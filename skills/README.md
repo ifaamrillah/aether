@@ -21,12 +21,19 @@ Aether skills use the portable Agent Skills folder format. Each skill has a requ
 
 | brainstorming | Explore and compare solution approaches |
 | agent-orchestration | Coordinate native subagents using task contracts and dependency waves |
+| architecture | Design system boundaries, contracts, and architecture decisions |
+| impact-analysis | Trace code, API, data, test, and operations impact |
+| refactoring | Restructure code while preserving observable behavior |
 | ui-ux-research | Research journeys, interface conventions, and accessibility |
 | design-system | Define reusable interface tokens and component patterns |
 | wireframing | Create low-fidelity layouts and interaction flows |
 | prototyping | Build reviewable UI prototypes before specification |
+| unit-testing | Verify isolated functions, classes, and state machines |
+| integration-testing | Verify collaborating modules and external boundaries |
+| e2e-testing | Verify complete user journeys |
 | visual-testing | Verify browser-rendered UI with screenshots and traces |
 | accessibility-audit | Audit keyboard, semantic, focus, and assistive behavior |
+| performance-testing | Measure latency, throughput, and resource usage |
 | threat-modeling | Identify trust boundaries, attack paths, and mitigations |
 
 ## Use
