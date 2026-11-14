@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aether.dev/schemas/project-config.schema.json",
+  "title": "Aether Project Configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project", "platforms", "workflow", "knowledge", "context", "security", "artifacts"],
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "mode"],
+      "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "mode": { "enum": ["greenfield", "brownfield"] } }
+    },
+    "platforms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": { "enabled": { "type": "array", "items": { "type": "string" }, "uniqueItems": true } }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default", "autonomy"],
+      "properties": { "default": { "type": "string" }, "autonomy": { "enum": ["manual", "balanced", "autonomous"] } }
+    },
+    "knowledge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["documentation_enabled", "incremental_updates", "codebase_index_enabled"],
+      "properties": {
+        "documentation_enabled": { "type": "boolean" },
+        "incremental_updates": { "type": "boolean" },
+        "codebase_index_enabled": { "type": "boolean" }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy"],
+      "properties": { "strategy": { "const": "progressive" }, "target_budget_tokens": { "type": "integer", "minimum": 1 } }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["require_approval_for"],
+      "properties": { "require_approval_for": { "type": "array", "items": { "type": "string" }, "uniqueItems": true } }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root"],
+      "properties": { "root": { "$ref": "common.schema.json#/$defs/relativeProjectPath" } }
+    },
+    "extensions": { "type": "object" }
+  }
+}
