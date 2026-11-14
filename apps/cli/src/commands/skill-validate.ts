@@ -40,7 +40,9 @@ export function validateSkillContent(
     severity: SkillValidationIssue["severity"],
     code: string,
     message: string,
-  ): void => issues.push({ severity, code, message });
+  ): void => {
+    issues.push({ severity, code, message });
+  };
 
   if (content.startsWith("\uFEFF")) {
     add("error", "frontmatter_bom", "SKILL.md must not begin with a byte-order mark.");
