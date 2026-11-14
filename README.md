@@ -89,6 +89,15 @@ Use the run ID with `workflow status`, `workflow pause`, `workflow resume --file
 
 The current adapters produce portable instructions and collect results. They do not yet execute native subagents, enforce OS-level file permissions, or independently rerun every test command.
 
+Inspect platform adapters and detected project markers with:
+
+```bash
+aether platform list
+aether platform detect
+```
+
+The capability report explicitly shows unsupported features such as native subagent invocation and parallel dispatch.
+
 The adapter registry also declares each host's skill discovery directory. Current defaults are:
 
 | Adapter | Skill directory |

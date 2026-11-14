@@ -18,6 +18,7 @@ import {
 } from "@aether/core";
 import type { TaskResultSubmission } from "@aether/core";
 import { createAgentAdapter } from "@aether/adapters";
+import { inspectAgentPlatforms } from "./commands/platform-info.js";
 import {
   validateAgentAdapterDescriptor,
   validateDelegationContract,
@@ -52,6 +53,8 @@ Commands:
   doctor [--project <path>]                    Check Aether configuration and managed files
   workflow validate <file>                    Validate workflow YAML and show execution waves
   skill validate [path]                        Validate portable Agent Skills (default: skills/)
+  platform list                                List adapter capabilities and skill paths
+  platform detect [--project <path>]           Detect platform markers in a project
   workflow run <file> [--input name=value]     Create and start a workflow run
   workflow status <run-id>                    Show persisted run and pending recovery events
   workflow handoff <run-id> --file <file>      Generate agent handoffs for ready stages
@@ -468,6 +471,51 @@ async function runWorkflowCommand(args: string[]): Promise<number> {
   return 2;
 }
 
+async function runPlatformCommand(args: string[]): Promise<number> {
+  const [subcommand, ...options] = args;
+
+  if (subcommand === "list") {
+    if (options.length > 0) throw new Error("platform list does not accept options.");
+    const platforms = await inspectAgentPlatforms(process.cwd());
+    for (const platform of platforms) {
+      const descriptor = platform.descriptor;
+      const capabilitySummary = descriptor.capabilities
+        .map((capability) => capability.id + "=" + capability.status)
+        .join(", ");
+      console.log(descriptor.id);
+      console.log("  Name: " + descriptor.name);
+      console.log("  Skill path: " + descriptor.skill_install_path);
+      console.log("  Handoff mode: " + descriptor.handoff_mode);
+      console.log("  Project detected: " + (platform.detected ? "yes" : "no"));
+      console.log("  Capabilities: " + capabilitySummary);
+    }
+    return 0;
+  }
+
+  if (subcommand === "detect") {
+    const parsed = parseOptions(options, ["--project"]);
+    const projectRoot = resolve(parsed["--project"] ?? process.cwd());
+    const platforms = await inspectAgentPlatforms(projectRoot);
+    console.log("Project: " + projectRoot);
+    for (const platform of platforms) {
+      const descriptor = platform.descriptor;
+      console.log(
+        (platform.detected ? "DETECTED " : "not detected ") +
+        descriptor.id.padEnd(14) +
+        descriptor.skill_install_path,
+      );
+    }
+    return 0;
+  }
+
+  if (subcommand === "help" || subcommand === undefined) {
+    console.log("Usage: aether platform list | platform detect [--project <path>]");
+    return 0;
+  }
+
+  throw new Error("Unknown platform command: " + subcommand);
+}
+
 async function runSkillCommand(args: string[]): Promise<number> {
   const [subcommand, target, ...extra] = args;
   if (subcommand !== "validate") {
@@ -730,6 +778,15 @@ async function main(args: string[]): Promise<number> {
       return await runSkillCommand(rest);
     } catch (error) {
       console.error(error instanceof Error ? error.message : "Skill command failed.");
+      return 1;
+    }
+  }
+
+  if (command === "platform") {
+    try {
+      return await runPlatformCommand(rest);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Platform command failed.");
       return 1;
     }
   }

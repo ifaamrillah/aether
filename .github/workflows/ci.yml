@@ -25,6 +25,8 @@ jobs:
       - run: pnpm build
       - run: node apps/cli/dist/index.js workflow validate workflows/feature.yaml
       - run: node apps/cli/dist/index.js skill validate skills
+      - run: node apps/cli/dist/index.js platform list
+      - run: node apps/cli/dist/index.js platform detect --project .
       - name: Smoke test project initialization and doctor
         shell: bash
         run: |
