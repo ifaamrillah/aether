@@ -27,10 +27,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$GITHUB_WORKSPACE/.artifacts"
-          pnpm --filter @aether/core pack --pack-destination "$GITHUB_WORKSPACE/.artifacts"
-          pnpm --filter @aether/schemas pack --pack-destination "$GITHUB_WORKSPACE/.artifacts"
-          pnpm --filter @aether/adapters pack --pack-destination "$GITHUB_WORKSPACE/.artifacts"
-          pnpm --filter @aether/cli pack --pack-destination "$GITHUB_WORKSPACE/.artifacts"
+          (cd packages/core && pnpm pack --pack-destination "$GITHUB_WORKSPACE/.artifacts")
+          (cd packages/schemas && pnpm pack --pack-destination "$GITHUB_WORKSPACE/.artifacts")
+          (cd packages/adapters && pnpm pack --pack-destination "$GITHUB_WORKSPACE/.artifacts")
+          (cd apps/cli && pnpm pack --pack-destination "$GITHUB_WORKSPACE/.artifacts")
           tar -tzf "$GITHUB_WORKSPACE/.artifacts/aether-cli-0.1.0.tgz" | grep -q 'package/dist/bundles/skills/project/project-onboarding/SKILL.md'
           tar -tzf "$GITHUB_WORKSPACE/.artifacts/aether-cli-0.1.0.tgz" | grep -q 'package/dist/bundles/workflows/feature.yaml'
           tar -xOf "$GITHUB_WORKSPACE/.artifacts/aether-cli-0.1.0.tgz" package/package.json | grep -q '"@aether/core": "0.1.0"'
