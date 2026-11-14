@@ -83,6 +83,9 @@ function parseOptions(args: string[], allowed: string[]): Record<string, string>
   const parsed: Record<string, string> = {};
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
+    if (typeof flag !== "string") {
+      throw new Error("Invalid option sequence.");
+    }
     if (!allowed.includes(flag)) {
       throw new Error('Unknown option "' + flag + '". Allowed options: ' + allowed.join(", "));
     }
