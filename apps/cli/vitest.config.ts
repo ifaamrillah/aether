@@ -10,6 +10,9 @@ export default defineConfig({
       "@aether/schemas": fileURLToPath(
         new URL("../../packages/schemas/src/index.ts", import.meta.url),
       ),
+      "@aether/adapters": fileURLToPath(
+        new URL("../../packages/adapters/src/index.ts", import.meta.url),
+      ),
     },
   },
 });
