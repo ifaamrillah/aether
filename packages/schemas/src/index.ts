@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
-import Ajv2020 from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
+import * as Ajv2020Module from "ajv/dist/2020.js";
+import * as addFormatsModule from "ajv-formats";
+
+const Ajv2020 = Ajv2020Module.default;
+const addFormats = addFormatsModule.default;
 import type { ErrorObject } from "ajv";
 
 export interface SchemaValidationIssue {
