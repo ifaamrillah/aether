@@ -34,6 +34,13 @@ Aether skills use the portable Agent Skills folder format. Each skill has a requ
 | visual-testing | Verify browser-rendered UI with screenshots and traces |
 | accessibility-audit | Audit keyboard, semantic, focus, and assistive behavior |
 | performance-testing | Measure latency, throughput, and resource usage |
+| dependency-audit | Audit direct and transitive packages, advisories, and licenses |
+| remediation | Implement validated security fixes with regression evidence |
+| release-engineering | Prepare versioned release candidates and artifacts |
+| staging-verification | Verify release candidates in staging |
+| production-release | Execute an approved production runbook |
+| incident-response | Coordinate evidence-preserving incident response |
+| documentation-audit | Detect drift between documentation and the source of truth |
 | threat-modeling | Identify trust boundaries, attack paths, and mitigations |
 
 ## Use
