@@ -62,7 +62,16 @@ beforeEach(async () => {
   await mkdir(join(root, "tests"), { recursive: true });
   await writeFile(join(root, "src", "feature.ts"), "export const feature = true;\n");
   await writeFile(join(root, "tests", "feature.test.ts"), "test('feature', () => {});\n");
-  await writeFile(join(root, "test-report.txt"), "2 tests passed\n");
+  const evidenceDirectory = join(
+    root,
+    ".aether",
+    "handoffs",
+    "run_test",
+    "implementation",
+    "output",
+  );
+  await mkdir(evidenceDirectory, { recursive: true });
+  await writeFile(join(evidenceDirectory, "test-report.txt"), "2 tests passed\n");
 });
 
 afterEach(async () => {
