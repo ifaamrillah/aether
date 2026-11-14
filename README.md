@@ -40,7 +40,7 @@ node apps/cli/dist/index.js workflow validate workflows/feature.yaml
 ## Repository layout
 
 - `apps/cli`: developer interface
-- `packages/core`: workflow semantics and execution planning
+- `packages/core`: workflow planning, file-backed run state, and event history
 - `packages/schemas`: canonical JSON Schema contracts and structural validation
 - `skills`: portable Agent Skills
 - `workflows`: declarative workflow definitions
