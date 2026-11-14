@@ -68,9 +68,15 @@ describe("project initialization", () => {
   });
 
   it("deduplicates platforms that share a skill destination", async () => {
-    const result = await initProject(options(["codex", "gemini-cli", "antigravity"]));
+    const result = await initProject(options(["codex", "antigravity"]));
     expect(result.destinations).toEqual([".agents/skills"]);
     expect(result.installed.filter((path) => path.endsWith("/SKILL.md"))).toHaveLength(1);
+  });
+
+  it("installs Gemini CLI skills into its dedicated project discovery directory", async () => {
+    const result = await initProject(options(["gemini-cli"]));
+    expect(result.destinations).toEqual([".gemini/skills"]);
+    expect(result.installed).toContain(".gemini/skills/implementation/SKILL.md");
   });
 
   it("preserves user-owned files and does not overwrite them", async () => {
