@@ -25,6 +25,15 @@ jobs:
       - run: pnpm build
       - run: node apps/cli/dist/index.js workflow validate workflows/feature.yaml
       - run: node apps/cli/dist/index.js skill validate skills
+      - name: Smoke test project initialization and doctor
+        shell: bash
+        run: |
+          project_dir="$(mktemp -d)"
+          node apps/cli/dist/index.js init --project "$project_dir" --skills "$GITHUB_WORKSPACE/skills" --platform codex --platform gemini-cli
+          node apps/cli/dist/index.js doctor --project "$project_dir"
+          test -f "$project_dir/.agents/skills/project-onboarding/SKILL.md"
+          test -f "$project_dir/.aether/managed-files.json"
+
       - name: Smoke test workflow lifecycle CLI
         shell: bash
         run: |

@@ -1,0 +1,117 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  doctorProject,
+  initProject,
+  type InitProjectOptions,
+} from "./project-setup.js";
+
+let projectRoot: string;
+let skillsRoot: string;
+let currentTime: number;
+
+async function createSkill(
+  group: string,
+  name: string,
+  contents = "export const value = 1;\n",
+): Promise<void> {
+  const directory = join(skillsRoot, group, name);
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, "SKILL.md"),
+    "---\nname: " + name + "\ndescription: A test skill for setup validation.\nlicense: MIT\n---\n# Test Skill\n\nUse this skill in test fixtures.\n",
+    "utf8",
+  );
+  await mkdir(join(directory, "scripts"), { recursive: true });
+  await writeFile(join(directory, "scripts", "helper.js"), contents, "utf8");
+}
+
+function options(platforms: InitProjectOptions["platforms"] = ["generic"]): InitProjectOptions {
+  return {
+    projectRoot,
+    skillsRoot,
+    platforms,
+    clock: () => new Date(currentTime),
+  };
+}
+
+beforeEach(async () => {
+  projectRoot = await mkdtemp(join(tmpdir(), "aether-project-init-"));
+  skillsRoot = await mkdtemp(join(tmpdir(), "aether-skill-source-"));
+  currentTime = Date.parse("2026-11-15T02:00:00.000Z");
+  await createSkill("engineering", "implementation");
+});
+
+afterEach(async () => {
+  await rm(projectRoot, { recursive: true, force: true });
+  await rm(skillsRoot, { recursive: true, force: true });
+});
+
+describe("project initialization", () => {
+  it("installs skills into the generic interoperable location", async () => {
+    const result = await initProject(options());
+    expect(result.installed).toContain(".agents/skills/implementation/SKILL.md");
+    expect(result.config).toBe("created");
+    expect(result.manifest).toBe("created");
+
+    const installed = await readFile(
+      join(projectRoot, ".agents", "skills", "implementation", "SKILL.md"),
+      "utf8",
+    );
+    expect(installed).toContain("name: implementation");
+    expect(await readFile(join(projectRoot, ".aether", "config.yaml"), "utf8"))
+      .toContain("autonomy: balanced");
+  });
+
+  it("deduplicates platforms that share a skill destination", async () => {
+    const result = await initProject(options(["codex", "gemini-cli", "antigravity"]));
+    expect(result.destinations).toEqual([".agents/skills"]);
+    expect(result.installed.filter((path) => path.endsWith("/SKILL.md"))).toHaveLength(1);
+  });
+
+  it("preserves user-owned files and does not overwrite them", async () => {
+    const destination = join(projectRoot, ".agents", "skills", "implementation");
+    await mkdir(destination, { recursive: true });
+    await writeFile(join(destination, "SKILL.md"), "user-owned content", "utf8");
+
+    const result = await initProject(options());
+    expect(result.conflicts.some((item) => item.path.endsWith("/SKILL.md"))).toBe(true);
+    expect(await readFile(join(destination, "SKILL.md"), "utf8")).toBe("user-owned content");
+  });
+
+  it("preserves modified Aether-managed files on subsequent init", async () => {
+    await initProject(options());
+    const destination = join(projectRoot, ".agents", "skills", "implementation", "SKILL.md");
+    await writeFile(destination, "user changed this after install", "utf8");
+
+    const result = await initProject(options());
+    expect(result.conflicts.some((item) => item.reason.includes("modified by a user"))).toBe(true);
+    expect(await readFile(destination, "utf8")).toBe("user changed this after install");
+  });
+
+  it("supports dry run without writing project files", async () => {
+    const result = await initProject({ ...options(), dryRun: true });
+    expect(result.installed).toContain(".agents/skills/implementation/SKILL.md");
+    await expect(readFile(join(projectRoot, ".aether", "config.yaml"), "utf8")).rejects.toThrow();
+  });
+
+  it("doctor validates initialized config and managed file checksums", async () => {
+    await initProject(options(["claude-code"]));
+    const result = await doctorProject(projectRoot);
+    expect(result.failed).toBe(0);
+    expect(result.passed).toBeGreaterThan(0);
+  });
+
+  it("doctor warns when a managed skill has been modified", async () => {
+    await initProject(options());
+    await writeFile(
+      join(projectRoot, ".agents", "skills", "implementation", "SKILL.md"),
+      "modified",
+      "utf8",
+    );
+    const result = await doctorProject(projectRoot);
+    expect(result.warnings).toBeGreaterThan(0);
+  });
+});

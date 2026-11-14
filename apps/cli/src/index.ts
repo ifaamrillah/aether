@@ -30,6 +30,11 @@ import {
 } from "./commands/workflow-validate.js";
 import { parseWorkflowRunOptions } from "./commands/workflow-inputs.js";
 import { validateSkills } from "./commands/skill-validate.js";
+import {
+  doctorProject,
+  initProject,
+  resolveBundledSkillsRoot,
+} from "./commands/project-setup.js";
 
 function printHelp(): void {
   console.log(`Aether — AI Engineering Harness
@@ -39,6 +44,8 @@ Usage:
 
 Commands:
   version                                      Show CLI and core version
+  init [options]                               Install Aether skills and initialize project config
+  doctor [--project <path>]                    Check Aether configuration and managed files
   workflow validate <file>                    Validate workflow YAML and show execution waves
   skill validate [path]                        Validate portable Agent Skills (default: skills/)
   workflow run <file> [--input name=value]     Create and start a workflow run
@@ -51,6 +58,13 @@ Commands:
   workflow recover <run-id> --file <file>      Replay pending events and reconcile run state
   workflow cancel <run-id>                    Cancel a non-terminal workflow run
   help                                         Show this help
+
+Init options:
+  --platform <name>                            Repeatable: generic, claude-code, codex, opencode, gemini-cli, antigravity
+  --mode greenfield|brownfield                 Project type (default: brownfield)
+  --project <path>                             Target project (default: current directory)
+  --skills <path>                              Source skill bundle (default: bundled Aether skills)
+  --dry-run                                    Preview changes without writing files
 
 Handoff options:
   --adapter generic|claude-code|codex|opencode|gemini-cli|antigravity
@@ -482,12 +496,144 @@ async function runSkillCommand(args: string[]): Promise<number> {
   return errorCount === 0 ? 0 : 1;
 }
 
+function parseInitArguments(args: string[]): {
+  projectRoot: string;
+  platforms: AdapterId[];
+  mode: "greenfield" | "brownfield";
+  skillsRoot?: string;
+  dryRun: boolean;
+} {
+  const platforms: AdapterId[] = [];
+  let projectRoot = process.cwd();
+  let mode: "greenfield" | "brownfield" = "brownfield";
+  let skillsRoot: string | undefined;
+  let dryRun = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (typeof flag !== "string") throw new Error("Invalid init option sequence.");
+
+    if (flag === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+
+    if (
+      flag !== "--platform" &&
+      flag !== "--mode" &&
+      flag !== "--project" &&
+      flag !== "--skills"
+    ) {
+      throw new Error('Unknown init option "' + flag + '".');
+    }
+
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) {
+      throw new Error("Missing value after " + flag + ".");
+    }
+    index += 1;
+
+    if (flag === "--platform") {
+      platforms.push(parseAdapterId(value));
+    } else if (flag === "--mode") {
+      if (value !== "greenfield" && value !== "brownfield") {
+        throw new Error("--mode must be greenfield or brownfield.");
+      }
+      mode = value;
+    } else if (flag === "--project") {
+      projectRoot = resolve(value);
+    } else if (flag === "--skills") {
+      skillsRoot = resolve(value);
+    }
+  }
+
+  return {
+    projectRoot,
+    platforms: platforms.length > 0 ? [...new Set(platforms)] : ["generic"],
+    mode,
+    ...(skillsRoot === undefined ? {} : { skillsRoot }),
+    dryRun,
+  };
+}
+
+async function runInitCommand(args: string[]): Promise<number> {
+  const options = parseInitArguments(args);
+  const skillsRoot = options.skillsRoot ?? await resolveBundledSkillsRoot();
+  const result = await initProject({
+    ...options,
+    skillsRoot,
+  });
+
+  console.log("Initialized Aether project: " + result.projectRoot);
+  console.log("Platforms: " + result.destinations.join(", "));
+  console.log("Project config: " + result.config);
+  console.log("Managed-file manifest: " + result.manifest);
+  console.log(
+    "Skills: " + result.installed.length + " installed, " +
+      result.updated.length + " updated, " +
+      result.unchanged.length + " unchanged.",
+  );
+  for (const conflict of result.conflicts) {
+    console.warn("Preserved " + conflict.path + ": " + conflict.reason);
+  }
+  if (result.conflicts.length > 0) {
+    console.warn(result.conflicts.length + " file conflict(s) were preserved without overwrite.");
+  }
+  if (options.dryRun) console.log("Dry run: no project files were changed.");
+  return 0;
+}
+
+async function runDoctorCommand(args: string[]): Promise<number> {
+  let projectRoot = process.cwd();
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (flag !== "--project") throw new Error('Unknown doctor option "' + flag + '".');
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) throw new Error("Missing value after --project.");
+    projectRoot = resolve(value);
+    index += 1;
+  }
+
+  const result = await doctorProject(projectRoot);
+  for (const check of result.checks) {
+    const label = check.status.toUpperCase().padEnd(7);
+    const output = label + check.name + ": " + check.message;
+    if (check.status === "fail") console.error(output);
+    else if (check.status === "warning") console.warn(output);
+    else console.log(output);
+  }
+  console.log(
+    "Doctor: " + result.passed + " passed, " +
+      result.warnings + " warning(s), " +
+      result.failed + " failure(s).",
+  );
+  return result.failed === 0 ? 0 : 1;
+}
+
 async function main(args: string[]): Promise<number> {
   const [command = "help", ...rest] = args;
 
   if (command === "version" || command === "--version" || command === "-v") {
     console.log("Aether " + getAetherVersion());
     return 0;
+  }
+
+  if (command === "init") {
+    try {
+      return await runInitCommand(rest);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Aether initialization failed.");
+      return 1;
+    }
+  }
+
+  if (command === "doctor") {
+    try {
+      return await runDoctorCommand(rest);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Aether doctor failed.");
+      return 1;
+    }
   }
 
   if (command === "workflow") {
