@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aether.dev/schemas/common.schema.json",
+  "title": "Aether Common Definitions",
+  "$defs": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+    },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "relativeProjectPath": {
+      "type": "string",
+      "minLength": 1,
+      "not": { "pattern": "(^/|(^|/)\\.\\.(/|$)|^[A-Za-z]:)" }
+    }
+  }
+}
