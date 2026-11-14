@@ -9,7 +9,7 @@ WorkflowRunService is the application service that creates and advances a workfl
 - Pin a run to a workflow ID and version.
 - Initialize all stage states as pending.
 - Start a run and mark dependency-free stages as ready.
-- Promote a pending stage to ready only after all its dependencies are completed.
+- Promote stages on required completion paths only after all their dependencies are completed.
 - Apply stage changes through the canonical stage transition state machine.
 - Update the run status from required completion stages and blocking states.
 - Persist each event and its corresponding snapshot under one per-run store lock.
@@ -44,9 +44,9 @@ A filesystem/process crash between the durable event append and snapshot replace
 
 ## Dependency semantics
 
-A stage becomes ready only when every declared dependency is in completed state. A skipped optional dependency is not considered complete in this version because the workflow contract does not yet define an explicit skip policy or a guarantee that its outputs are unnecessary.
+A stage becomes ready only when every declared dependency is in completed state. The service computes the transitive dependency closure of workflow.completion.required_stages and activates only stages in that closure. An optional stage that is a prerequisite of a required completion stage is therefore executed as part of the required path. An independent optional stage remains pending and does not block run completion.
 
-Independent root stages can become ready together. This only produces a plan/state; it does not launch agents or promise parallel execution.
+A skipped optional dependency is not considered complete in this version because the workflow contract does not yet define an explicit skip policy or a guarantee that its outputs are unnecessary. Independent eligible root stages in the required dependency closure can become ready together. This only produces a plan/state; it does not launch agents or promise parallel execution.
 
 ## Input and secret handling
 
@@ -59,6 +59,7 @@ Do not pass raw credentials, API keys, or other secrets as workflow inputs. The 
 - No resume, pause, cancel, or crash event replay yet.
 - No conditional stage evaluation.
 - No optional dependency skip policy.
+- No explicit selection mechanism for independent optional stages.
 - No agent execution or delegation.
 - No output/verification artifact enforcement.
 - No multi-process event-snapshot recovery after a hard process crash.

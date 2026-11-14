@@ -211,13 +211,62 @@ describe("WorkflowRunService", () => {
     );
   });
 
-  it("allows independent optional stages to become ready in parallel", async () => {
+  it("leaves independent optional stages dormant outside required completion paths", async () => {
     const created = await service.createRun(workflow, {
       feature_description: "Add settings",
     });
     const started = await service.startRun(created.id, workflow);
 
     expect(started.stages.discovery?.status).toBe("ready");
-    expect(started.stages.documentation?.status).toBe("ready");
+    expect(started.stages.documentation?.status).toBe("pending");
+  });
+
+  it("executes optional stages that are dependencies of required completion stages", async () => {
+    const workflowWithOptionalDependency: WorkflowDefinition = {
+      ...workflow,
+      stages: [
+        {
+          id: "optional-setup",
+          skill: "optional-setup",
+          required: false,
+        },
+        {
+          ...workflow.stages[0]!,
+          depends_on: ["optional-setup"],
+        },
+        ...workflow.stages.slice(1),
+      ],
+    };
+    const created = await service.createRun(workflowWithOptionalDependency, {
+      feature_description: "Add settings",
+    });
+    const started = await service.startRun(created.id, workflowWithOptionalDependency);
+
+    expect(started.stages["optional-setup"]?.status).toBe("ready");
+    expect(started.stages.discovery?.status).toBe("pending");
+
+    const completed = await service.transitionStage(
+      created.id,
+      workflowWithOptionalDependency,
+      "optional-setup",
+      "in_progress",
+    );
+    const verifying = await service.transitionStage(
+      created.id,
+      workflowWithOptionalDependency,
+      "optional-setup",
+      "verifying",
+    );
+    expect(verifying.stages["optional-setup"]?.status).toBe("verifying");
+
+    const done = await service.transitionStage(
+      created.id,
+      workflowWithOptionalDependency,
+      "optional-setup",
+      "completed",
+    );
+    expect(done.stages.discovery?.status).toBe("ready");
+    expect(done.status).toBe("running");
+    expect(completed.stages["optional-setup"]?.attempt).toBe(1);
   });
 });

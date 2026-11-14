@@ -250,6 +250,11 @@ export class WorkflowRunService {
         'Stage "' + stageId + '" cannot become ready until all dependencies are completed.',
       );
     }
+    if (to === "skipped" && this.requiredExecutionStageIds(workflow).has(stageId)) {
+      throw new WorkflowRunConflictError(
+        'Stage "' + stageId + '" is required by a completion path and cannot be skipped.',
+      );
+    }
     if (to === "skipped" && stageDefinition.required) {
       throw new WorkflowRunConflictError(
         'Required stage "' + stageId + '" cannot be skipped.',
@@ -314,8 +319,10 @@ export class WorkflowRunService {
     workflow: WorkflowDefinition,
   ): Promise<WorkflowRunSnapshot> {
     let snapshot = initial;
+    const executionScope = this.requiredExecutionStageIds(workflow);
 
     for (const definition of workflow.stages) {
+      if (!executionScope.has(definition.id)) continue;
       const stage = snapshot.stages[definition.id];
       if (!stage || stage.status !== "pending") continue;
       if (!this.dependenciesCompleted(definition, snapshot)) continue;
@@ -336,6 +343,33 @@ export class WorkflowRunService {
     }
 
     return snapshot;
+  }
+
+  /**
+   * Returns the transitive dependency closure of required completion stages.
+   * Optional stages outside this set remain dormant unless a later workflow
+   * feature explicitly selects them.
+   */
+  private requiredExecutionStageIds(workflow: WorkflowDefinition): Set<string> {
+    const definitions = new Map(
+      workflow.stages.map((stage) => [stage.id, stage] as const),
+    );
+    const required = new Set<string>();
+
+    const visit = (stageId: string): void => {
+      if (required.has(stageId)) return;
+      required.add(stageId);
+      const definition = definitions.get(stageId);
+      for (const dependency of definition?.depends_on ?? []) {
+        visit(dependency);
+      }
+    };
+
+    for (const stageId of workflow.completion.required_stages) {
+      visit(stageId);
+    }
+
+    return required;
   }
 
   private dependenciesCompleted(
@@ -421,15 +455,19 @@ export class WorkflowRunService {
     const requiredStatuses = workflow.completion.required_stages.map(
       (stageId) => snapshot.stages[stageId]?.status,
     );
+    const executionScope = this.requiredExecutionStageIds(workflow);
+    const executionStages = [...executionScope]
+      .map((stageId) => snapshot.stages[stageId])
+      .filter((stage): stage is StageRunState => stage !== undefined);
 
     let status: RunStatus = "running";
     if (requiredStatuses.every((stageStatus) => stageStatus === "completed")) {
       status = "completed";
-    } else if (Object.values(snapshot.stages).some((stage) => stage.status === "awaiting_approval")) {
+    } else if (executionStages.some((stage) => stage.status === "awaiting_approval")) {
       status = "awaiting_approval";
-    } else if (Object.values(snapshot.stages).some((stage) => stage.status === "blocked")) {
+    } else if (executionStages.some((stage) => stage.status === "blocked")) {
       status = "blocked";
-    } else if (Object.values(snapshot.stages).some((stage) => stage.status === "failed")) {
+    } else if (executionStages.some((stage) => stage.status === "failed")) {
       status = "failed";
     }
 
