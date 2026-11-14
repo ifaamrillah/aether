@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a feature or improvement for Aether.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explain the user problem first. Aether favors modular, portable, evidence-driven capabilities.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: What is difficult or missing today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful behavior and expected output.
+    validations:
+      required: true
+  - type: textarea
+    id: portability
+    attributes:
+      label: Portability and safety considerations
+      description: Does this require a platform-specific capability, permissions, network access, or human approval?
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false

@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a reproducible defect in Aether.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please search existing issues first. Do not include secrets or private project data.
+  - type: input
+    id: version
+    attributes:
+      label: Aether version or commit
+      placeholder: "0.1.0 or commit SHA"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI
+        - Core workflow/state
+        - Schemas
+        - Agent adapters
+        - Skills
+        - Project installer
+        - Documentation
+        - CI/release
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include the exact command and relevant non-sensitive output.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. ...\n2. ...\n3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Node.js, pnpm, OS, and agent platform if relevant.
+    validations:
+      required: true

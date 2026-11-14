@@ -23,6 +23,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: node scripts/release/check-version.mjs v0.1.0
       - name: Verify publishable workspace tarballs
         shell: bash
         run: |
