@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+.turbo/
+.cache/
+.aether/cache/
+.aether/indexes/
+.aether/runs/
+.env
+.env.*
+!.env.example
+.DS_Store
