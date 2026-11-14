@@ -81,6 +81,92 @@ describe("validateWorkflowSemantics", () => {
     expect(validateWorkflowSemantics(definition).map((issue) => issue.code))
       .toContain("dependency_cycle");
   });
+  it("rejects a conditional stage in the required completion path", () => {
+    const definition: WorkflowDefinition = {
+      ...workflow([
+        { id: "discovery", skill: "discovery", required: true },
+        {
+          id: "conditional",
+          skill: "optional",
+          required: false,
+          depends_on: ["discovery"],
+          condition: { expression: { op: "eq", left: true, right: true } },
+        },
+      ]),
+      completion: { required_stages: ["conditional"] },
+    };
+    expect(validateWorkflowSemantics(definition).map((issue) => issue.code))
+      .toContain("conditional_required_stage");
+  });
+
+  it("requires conditional stages to depend only on the required execution path", () => {
+    const definition: WorkflowDefinition = {
+      ...workflow([
+        { id: "required", skill: "required", required: true },
+        { id: "optional-parent", skill: "optional-parent", required: false },
+        {
+          id: "conditional",
+          skill: "conditional",
+          required: false,
+          depends_on: ["optional-parent"],
+          condition: { expression: { op: "eq", left: true, right: true } },
+        },
+      ]),
+      completion: { required_stages: ["required"] },
+    };
+    expect(validateWorkflowSemantics(definition).map((issue) => issue.code))
+      .toContain("conditional_dependency_outside_required_path");
+  });
+
+  it("rejects unknown input and non-ancestor stage references in conditions", () => {
+    const unknownInput: WorkflowDefinition = {
+      ...workflow([
+        { id: "discovery", skill: "discovery", required: true },
+        {
+          id: "conditional",
+          skill: "conditional",
+          required: false,
+          depends_on: ["discovery"],
+          condition: {
+            expression: {
+              op: "eq",
+              left: { ref: "input.missing" },
+              right: true,
+            },
+          },
+        },
+      ]),
+      inputs: [{ name: "known", type: "boolean", required: false }],
+      completion: { required_stages: ["discovery"] },
+    };
+    expect(validateWorkflowSemantics(unknownInput).map((issue) => issue.code))
+      .toContain("condition_unknown_input");
+
+    const unrelatedStageReference: WorkflowDefinition = {
+      ...workflow([
+        { id: "discovery", skill: "discovery", required: true },
+        { id: "other", skill: "other", required: false },
+        {
+          id: "conditional",
+          skill: "conditional",
+          required: false,
+          depends_on: ["discovery"],
+          condition: {
+            expression: {
+              op: "eq",
+              left: { ref: "stage.other.status" },
+              right: "completed",
+            },
+          },
+        },
+      ]),
+      completion: { required_stages: ["discovery"] },
+    };
+    expect(validateWorkflowSemantics(unrelatedStageReference).map((issue) => issue.code))
+      .toContain("condition_stage_reference_not_dependency");
+  });
+
+
 });
 
 describe("buildExecutionWaves", () => {

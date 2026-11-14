@@ -61,6 +61,22 @@ completion:
 
 The run service schedules the transitive dependency closure of the required completion stages. An optional stage that is a prerequisite for a required stage is still part of that path. Independent optional stages remain dormant unless a future workflow feature explicitly selects them.
 
+## Conditional stages
+
+A stage may declare a restricted condition expression. Conditions are evaluated only after all declared dependencies have completed.
+
+Supported operators are:
+- eq and neq for equality and inequality.
+- in when the right operand resolves to an array.
+- and, or, and not for boolean composition.
+- exists to test whether a reference is present.
+
+References may read workflow inputs (input.name), project context (project.name), capability context (capability.name), and dependency stage fields (stage.stage-id.status). Nested object fields are supported. A comparison against an unavailable reference fails closed with an evaluation error; exists returns false for a missing reference. Arbitrary JavaScript and eval are never executed.
+
+Conditional stages must be optional and must not be part of the required completion dependency closure. Their dependencies must all belong to the required execution path. A true condition makes the stage ready; a false condition records the stage as skipped. If a condition is true, that selected stage must itself complete before the run can complete. Optional stages without conditions remain dormant unless they are dependencies of required completion stages.
+
+Conditions are evaluated against the run's persisted inputs and the project/capability context supplied to WorkflowRunService. The CLI supplies the project ID automatically. Embedded integrations may supply additional project and capability fields. Context used by a condition should remain stable for the lifetime of a run; create a new workflow run when those assumptions change.
+
 ## Validation
 
 ```bash
