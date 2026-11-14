@@ -1,10 +1,44 @@
 import { readFileSync } from "node:fs";
-import * as Ajv2020Module from "ajv/dist/2020.js";
-import * as addFormatsModule from "ajv-formats";
-
-const Ajv2020 = Ajv2020Module.default;
-const addFormats = addFormatsModule.default;
+import { createRequire } from "node:module";
 import type { ErrorObject } from "ajv";
+
+const require = createRequire(import.meta.url);
+
+type CompiledValidator = ((value: unknown) => boolean) & {
+  errors?: ErrorObject[] | null;
+};
+
+interface AjvInstance {
+  addSchema(schema: object): AjvInstance;
+  compile(schema: object): CompiledValidator;
+}
+
+type AjvConstructor = new (options: {
+  allErrors: boolean;
+  strict: boolean;
+}) => AjvInstance;
+
+type AddFormats = (ajv: AjvInstance) => void;
+
+function unwrapDefault<T>(moduleValue: unknown): T {
+  if (
+    typeof moduleValue === "object" &&
+    moduleValue !== null &&
+    "default" in moduleValue
+  ) {
+    return (moduleValue as { default: T }).default;
+  }
+
+  return moduleValue as T;
+}
+
+// createRequire handles Ajv's CommonJS-compatible exports under NodeNext.
+const Ajv2020 = unwrapDefault<AjvConstructor>(
+  require("ajv/dist/2020.js"),
+);
+const addFormats = unwrapDefault<AddFormats>(
+  require("ajv-formats"),
+);
 
 export interface SchemaValidationIssue {
   path: string;
@@ -40,7 +74,7 @@ export function validateWorkflowDefinition(
 
   return {
     valid,
-    errors: (validateWorkflow.errors ?? []).map((error: ErrorObject) => ({
+    errors: (validateWorkflow.errors ?? []).map((error) => ({
       path: error.instancePath || "/",
       keyword: error.keyword,
       message: error.message ?? "Schema validation failed.",
