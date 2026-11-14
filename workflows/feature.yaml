@@ -1,0 +1,47 @@
+schema_version: 1
+id: feature-development
+version: 1
+name: Feature Development
+description: A starter workflow for implementing a scoped feature.
+
+inputs:
+  - name: feature_description
+    type: string
+    required: true
+
+stages:
+  - id: discovery
+    skill: discovery
+    required: true
+
+  - id: specification
+    skill: specification
+    required: true
+    depends_on:
+      - discovery
+
+  - id: planning
+    skill: implementation-planning
+    required: true
+    depends_on:
+      - specification
+
+  - id: implementation
+    skill: implementation
+    required: true
+    depends_on:
+      - planning
+
+  - id: verification
+    skill: testing
+    required: true
+    depends_on:
+      - implementation
+
+completion:
+  required_stages:
+    - discovery
+    - specification
+    - planning
+    - implementation
+    - verification

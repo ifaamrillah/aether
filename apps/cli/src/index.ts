@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
+import { readFile } from "node:fs/promises";
 import { getAetherVersion } from "@aether/core";
-
-const [command = "help"] = process.argv.slice(2);
+import { validateWorkflowContent } from "./commands/workflow-validate.js";
 
 function printHelp(): void {
   console.log(`Aether — AI Engineering Harness
@@ -11,26 +11,59 @@ Usage:
   aether <command>
 
 Commands:
-  version   Show CLI and core version
-  help      Show this help
-
-More commands will be added incrementally.
+  version                         Show CLI and core version
+  workflow validate <file>        Validate a workflow YAML file and show execution waves
+  help                            Show this help
 `);
 }
 
-switch (command) {
-  case "version":
-  case "--version":
-  case "-v":
+async function main(args: string[]): Promise<number> {
+  const [command = "help", subcommand, filePath] = args;
+
+  if (command === "version" || command === "--version" || command === "-v") {
     console.log(`Aether ${getAetherVersion()}`);
-    break;
-  case "help":
-  case "--help":
-  case "-h":
+    return 0;
+  }
+
+  if (command === "workflow" && subcommand === "validate") {
+    if (!filePath) {
+      console.error("Missing workflow file path.");
+      console.error("Usage: aether workflow validate <file>");
+      return 2;
+    }
+
+    try {
+      const content = await readFile(filePath, "utf8");
+      const result = validateWorkflowContent(content);
+
+      if (!result.ok) {
+        console.error("Workflow validation failed:");
+        for (const error of result.errors) console.error(`- ${error}`);
+        return 1;
+      }
+
+      console.log(`Workflow valid: ${result.workflowId} (v${result.version})`);
+      console.log("Execution waves:");
+      result.waves.forEach((wave, index) => {
+        console.log(`  ${index + 1}. ${wave.join(", ")}`);
+      });
+      return 0;
+    } catch (error) {
+      console.error(
+        error instanceof Error ? error.message : "Unable to read workflow file.",
+      );
+      return 1;
+    }
+  }
+
+  if (command === "help" || command === "--help" || command === "-h") {
     printHelp();
-    break;
-  default:
-    console.error(`Unknown command: ${command}`);
-    printHelp();
-    process.exitCode = 1;
+    return 0;
+  }
+
+  console.error(`Unknown command: ${args.join(" ")}`);
+  printHelp();
+  return 2;
 }
+
+process.exitCode = await main(process.argv.slice(2));

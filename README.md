@@ -2,56 +2,49 @@
 
 **An open-source, agent-agnostic AI Engineering Harness.**
 
-Aether helps AI coding agents work through reliable engineering workflows: discover a project, understand requirements, plan changes, implement them, verify evidence, and maintain project knowledge.
+Aether helps AI coding agents work through reliable engineering workflows: understand a project, plan changes, implement them, verify evidence, and maintain project knowledge.
 
-Aether is a modular harness—not a replacement agent runtime. It combines portable Agent Skills, declarative workflows, versioned contracts, a lightweight TypeScript CLI, and platform adapters while delegating actual agent execution to native platform capabilities.
+Aether is a modular harness, not a replacement agent runtime. It combines portable Agent Skills, declarative workflows, versioned contracts, a lightweight TypeScript CLI, and platform adapters while delegating execution to native platform capabilities.
 
-## Design principles
+## Principles
 
-- **Modular and composable:** use the pieces a project needs.
-- **Agent-agnostic:** keep workflows and contracts portable across coding agents.
-- **Native-first orchestration:** use platform-native delegation where available.
-- **Evidence-driven:** completion requires verifiable outputs, not just an agent's claim.
-- **Living knowledge:** keep approved specifications, decisions, and docs aligned with code.
-- **Adaptive:** select workflows based on intent, risk, and complexity.
-- **Context-efficient:** retrieve only the information needed for each task.
-- **Human-controlled autonomy:** require approval for high-impact actions.
+- Modular and composable.
+- Agent-agnostic and portable.
+- Native-first orchestration.
+- Evidence-driven completion.
+- Living project knowledge.
+- Adaptive workflows.
+- Context-efficient retrieval.
+- Human approval for high-impact actions.
 
-## Repository status
+## Status
 
-Aether is in its **foundation / early implementation** phase. Interfaces and schemas are evolving. Do not treat planned capabilities as implemented until they are present and covered by tests.
+Aether is in its foundation and early implementation phase. Planned capabilities are not considered implemented until present and tested.
 
-## Architecture
-
-```text
-apps/cli/          Local developer interface
-packages/core/     Workflow, state, policy, and artifact services
-packages/schemas/  Canonical JSON Schema contracts
-packages/adapters/ Agent platform integrations
-skills/            Portable Agent Skills
-workflows/         Declarative workflow definitions
-templates/         Artifact templates
-evals/             Skill and workflow evaluations
-docs/              Architecture and contributor documentation
-```
-
-## Getting started
+## Development
 
 Requirements: Node.js 22+ and pnpm 10+.
 
 ```bash
 pnpm install
-pnpm build
-pnpm test
+pnpm check
 ```
 
-The CLI is under active development. Its commands and configuration format will be documented as they become available.
+Validate the starter workflow:
 
-## Project documentation
+```bash
+pnpm --filter @aether/cli build
+node apps/cli/dist/index.js workflow validate workflows/feature.yaml
+```
 
-- [Architecture](docs/architecture/README.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security](SECURITY.md)
+## Repository layout
+
+- `apps/cli`: developer interface
+- `packages/core`: workflow semantics and execution planning
+- `packages/schemas`: canonical JSON Schema contracts and structural validation
+- `skills`: portable Agent Skills
+- `workflows`: declarative workflow definitions
+- `docs`: architecture and contributor documentation
 
 ## License
 
