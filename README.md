@@ -89,6 +89,19 @@ Use the run ID with `workflow status`, `workflow pause`, `workflow resume --file
 
 The current adapters produce portable instructions and collect results. They do not yet execute native subagents, enforce OS-level file permissions, or independently rerun every test command.
 
+The adapter registry also declares each host's skill discovery directory. Current defaults are:
+
+| Adapter | Skill directory |
+|---|---|
+| Generic | `.agents/skills/` |
+| Claude Code | `.claude/skills/` |
+| Codex | `.agents/skills/` |
+| OpenCode | `.opencode/skills/` |
+| Gemini CLI | `.gemini/skills/` |
+| Antigravity | `.agents/skills/` |
+
+These paths follow the platforms' documented project-level skill discovery conventions: [Claude Code](https://code.claude.com/docs/en/skills), [Codex](https://developers.openai.com/codex/skills), [OpenCode](https://opencode.ai/docs/skills/), [Gemini CLI](https://geminicli.com/docs/cli/skills/), and [Antigravity](https://antigravity.google/docs/skills).
+
 ## Repository layout
 
 - `apps/cli`: developer interface

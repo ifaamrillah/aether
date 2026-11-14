@@ -128,6 +128,7 @@ describe("canonical JSON Schemas", () => {
       handoff_mode: "human-mediated",
       supported_skill_format: ["agentskills"],
       project_markers: [],
+      skill_install_path: ".agents/skills",
       capabilities: [
         { id: "agent_handoff", status: "supported" },
         { id: "native_subagents", status: "unsupported" }

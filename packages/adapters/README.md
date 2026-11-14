@@ -1,17 +1,19 @@
 # Agent Adapters
 
-Aether adapters translate a portable task contract into platform-aware handoff instructions. They describe platform markers and capabilities without making the core workflow model platform-specific.
+Aether adapters translate a portable task contract into platform-aware handoff instructions. They describe platform markers, skill discovery paths, and capabilities without making the core workflow model platform-specific.
+
+The project installer consumes `skill_install_path` from the adapter descriptor. Do not duplicate host-specific skill directories in the CLI or project setup code.
 
 ## Current adapters
 
-| Adapter | Detection marker | Current handoff mode |
-|---|---|---|
-| generic | Always available | Human-mediated |
-| Claude Code | `.claude/` | Human-mediated |
-| Codex | `.agents/` or `.codex/` | Human-mediated |
-| OpenCode | `.opencode/` | Human-mediated |
-| Gemini CLI | `.gemini/` or `GEMINI.md` | Human-mediated |
-| Antigravity | `.agents/`, `AGENTS.md`, or `GEMINI.md` | Human-mediated |
+| Adapter | Detection marker | Skill discovery directory | Current handoff mode |
+|---|---|---|---|
+| generic | Always available | `.agents/skills/` | Human-mediated |
+| Claude Code | `.claude/` | `.claude/skills/` | Human-mediated |
+| Codex | `.agents/` or `.codex/` | `.agents/skills/` | Human-mediated |
+| OpenCode | `.opencode/` | `.opencode/skills/` | Human-mediated |
+| Gemini CLI | `.gemini/` or `GEMINI.md` | `.gemini/skills/` | Human-mediated |
+| Antigravity | `.agents/`, `AGENTS.md`, or `GEMINI.md` | `.agents/skills/` | Human-mediated |
 
 ## Capability reporting
 

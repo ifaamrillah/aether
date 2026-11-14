@@ -12,7 +12,8 @@
     "handoff_mode",
     "supported_skill_format",
     "capabilities",
-    "project_markers"
+    "project_markers",
+    "skill_install_path"
   ],
   "properties": {
     "schema_version": {
@@ -83,6 +84,9 @@
         "$ref": "common.schema.json#/$defs/relativeProjectPath"
       },
       "uniqueItems": true
+    },
+    "skill_install_path": {
+      "$ref": "common.schema.json#/$defs/relativeProjectPath"
     }
   }
 }

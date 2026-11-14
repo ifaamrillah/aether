@@ -51,17 +51,17 @@ function descriptor(id: AdapterId): AdapterDescriptor {
 
   switch (id) {
     case "generic":
-      return { ...common, id, name: "Generic Agent Handoff", project_markers: [] };
+      return { ...common, id, name: "Generic Agent Handoff", project_markers: [], skill_install_path: ".agents/skills" };
     case "claude-code":
-      return { ...common, id, name: "Claude Code Handoff", project_markers: [".claude"] };
+      return { ...common, id, name: "Claude Code Handoff", project_markers: [".claude"], skill_install_path: ".claude/skills" };
     case "codex":
-      return { ...common, id, name: "Codex Handoff", project_markers: [".agents", ".codex"] };
+      return { ...common, id, name: "Codex Handoff", project_markers: [".agents", ".codex"], skill_install_path: ".agents/skills" };
     case "opencode":
-      return { ...common, id, name: "OpenCode Handoff", project_markers: [".opencode"] };
+      return { ...common, id, name: "OpenCode Handoff", project_markers: [".opencode"], skill_install_path: ".opencode/skills" };
     case "gemini-cli":
-      return { ...common, id, name: "Gemini CLI Handoff", project_markers: [".gemini", "GEMINI.md"] };
+      return { ...common, id, name: "Gemini CLI Handoff", project_markers: [".gemini", "GEMINI.md"], skill_install_path: ".gemini/skills" };
     case "antigravity":
-      return { ...common, id, name: "Antigravity Handoff", project_markers: [".agents", "AGENTS.md", "GEMINI.md"] };
+      return { ...common, id, name: "Antigravity Handoff", project_markers: [".agents", "AGENTS.md", "GEMINI.md"], skill_install_path: ".agents/skills" };
   }
 }
 

@@ -45,9 +45,24 @@ describe("agent adapters", () => {
     ]);
     for (const item of descriptors) {
       expect(item.handoff_mode).toBe("human-mediated");
+      expect(item.skill_install_path).toMatch(/^\\.[a-z-]+\\/skills$/);
       expect(item.capabilities.find((capability) => capability.id === "native_subagents")?.status)
         .toBe("unsupported");
     }
+  });
+
+  it("declares the platform-native skill installation directory", () => {
+    const locations = Object.fromEntries(
+      listAgentAdapters().map((item) => [item.id, item.skill_install_path]),
+    );
+    expect(locations).toEqual({
+      generic: ".agents/skills",
+      "claude-code": ".claude/skills",
+      codex: ".agents/skills",
+      opencode: ".opencode/skills",
+      "gemini-cli": ".gemini/skills",
+      antigravity: ".agents/skills",
+    });
   });
 
   it("always detects generic handoff", async () => {

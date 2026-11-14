@@ -14,17 +14,9 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { fileURLToPath } from "node:url";
 import { parse, stringify } from "yaml";
 import { validateAetherContract } from "@aether/schemas";
+import { createAgentAdapter } from "@aether/adapters";
 import type { AdapterId } from "@aether/adapters";
 import { validateSkills } from "./skill-validate.js";
-
-const PLATFORM_SKILL_TARGETS: Record<AdapterId, string> = {
-  generic: ".agents/skills",
-  "claude-code": ".claude/skills",
-  codex: ".agents/skills",
-  opencode: ".opencode/skills",
-  "gemini-cli": ".agents/skills",
-  antigravity: ".agents/skills",
-};
 
 export type ProjectMode = "greenfield" | "brownfield";
 
@@ -356,7 +348,9 @@ export async function initProject(
   const mode = options.mode ?? "brownfield";
   const skillsRoot = await realpath(resolve(options.skillsRoot ?? await resolveBundledSkillsRoot()));
   const skillBundle = await resolveSkillBundle(skillsRoot);
-  const destinations = [...new Set(platforms.map((platform) => PLATFORM_SKILL_TARGETS[platform]))];
+  const destinations = [...new Set(
+    platforms.map((platform) => createAgentAdapter(platform).descriptor.skill_install_path),
+  )];
 
   const result: InitProjectResult = {
     projectRoot,

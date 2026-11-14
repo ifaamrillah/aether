@@ -24,6 +24,7 @@ export interface AdapterDescriptor {
   supported_skill_format: string[];
   capabilities: CapabilityDescriptor[];
   project_markers: string[];
+  skill_install_path: string;
 }
 
 export interface AgentAdapter {
