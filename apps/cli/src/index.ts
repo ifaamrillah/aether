@@ -34,6 +34,8 @@ import {
   doctorProject,
   initProject,
   resolveBundledSkillsRoot,
+  uninstallProject,
+  updateProject,
 } from "./commands/project-setup.js";
 
 function printHelp(): void {
@@ -45,6 +47,8 @@ Usage:
 Commands:
   version                                      Show CLI and core version
   init [options]                               Install Aether skills and initialize project config
+  update [options]                             Update unchanged Aether-managed skills
+  uninstall [--project <path>]                 Remove unchanged managed files; preserve project config
   doctor [--project <path>]                    Check Aether configuration and managed files
   workflow validate <file>                    Validate workflow YAML and show execution waves
   skill validate [path]                        Validate portable Agent Skills (default: skills/)
@@ -610,6 +614,64 @@ async function runDoctorCommand(args: string[]): Promise<number> {
   return result.failed === 0 ? 0 : 1;
 }
 
+async function runUpdateCommand(args: string[]): Promise<number> {
+  let projectRoot = process.cwd();
+  let skillsRoot: string | undefined;
+  let dryRun = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (flag === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+    if (flag !== "--project" && flag !== "--skills") {
+      throw new Error('Unknown update option "' + flag + '".');
+    }
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) throw new Error("Missing value after " + flag + ".");
+    if (flag === "--project") projectRoot = resolve(value);
+    else skillsRoot = resolve(value);
+    index += 1;
+  }
+
+  const result = await updateProject({
+    projectRoot,
+    ...(skillsRoot === undefined ? {} : { skillsRoot }),
+    dryRun,
+  });
+  console.log("Updated Aether project: " + result.projectRoot);
+  console.log(
+    result.installed.length + " installed, " + result.updated.length +
+      " updated, " + result.unchanged.length + " unchanged.",
+  );
+  for (const conflict of result.conflicts) {
+    console.warn("Preserved " + conflict.path + ": " + conflict.reason);
+  }
+  if (dryRun) console.log("Dry run: no project files were changed.");
+  return 0;
+}
+
+async function runUninstallCommand(args: string[]): Promise<number> {
+  let projectRoot = process.cwd();
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (flag !== "--project") throw new Error('Unknown uninstall option "' + flag + '".');
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) throw new Error("Missing value after --project.");
+    projectRoot = resolve(value);
+    index += 1;
+  }
+
+  const result = await uninstallProject(projectRoot);
+  console.log("Uninstalled Aether-managed files from " + resolve(projectRoot));
+  console.log(result.removed.length + " file(s) removed; " + result.alreadyMissing.length + " already missing.");
+  for (const item of result.preserved) {
+    console.warn("Preserved " + item.path + ": " + item.reason);
+  }
+  console.log("Project config was preserved. Remove .aether/config.yaml manually only when you no longer need it.");
+  return 0;
+}
+
 async function main(args: string[]): Promise<number> {
   const [command = "help", ...rest] = args;
 
@@ -632,6 +694,24 @@ async function main(args: string[]): Promise<number> {
       return await runDoctorCommand(rest);
     } catch (error) {
       console.error(error instanceof Error ? error.message : "Aether doctor failed.");
+      return 1;
+    }
+  }
+
+  if (command === "update") {
+    try {
+      return await runUpdateCommand(rest);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Aether update failed.");
+      return 1;
+    }
+  }
+
+  if (command === "uninstall") {
+    try {
+      return await runUninstallCommand(rest);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Aether uninstall failed.");
       return 1;
     }
   }

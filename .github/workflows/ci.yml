@@ -33,6 +33,10 @@ jobs:
           node apps/cli/dist/index.js doctor --project "$project_dir"
           test -f "$project_dir/.agents/skills/project-onboarding/SKILL.md"
           test -f "$project_dir/.aether/managed-files.json"
+          node apps/cli/dist/index.js update --project "$project_dir" --skills "$GITHUB_WORKSPACE/skills"
+          node apps/cli/dist/index.js uninstall --project "$project_dir"
+          test -f "$project_dir/.aether/config.yaml"
+          test ! -f "$project_dir/.agents/skills/project-onboarding/SKILL.md"
 
       - name: Smoke test workflow lifecycle CLI
         shell: bash

@@ -37,6 +37,24 @@ pnpm --filter @aether/cli build
 node apps/cli/dist/index.js workflow validate workflows/feature.yaml
 ```
 
+Initialize a project with portable Agent Skills:
+
+```bash
+aether init --platform codex --platform claude-code
+aether doctor
+```
+
+The installer writes a validated `.aether/config.yaml` and a checksummed `.aether/managed-files.json`. It never overwrites untracked skills or Aether-managed files that have been edited by a user. Use `--dry-run` to preview changes.
+
+Update and uninstall are conservative:
+
+```bash
+aether update
+aether uninstall
+```
+
+Update refreshes unchanged Aether-managed files using the platforms recorded in project config. Uninstall removes only managed files whose checksums still match; project config and user edits are preserved.
+
 Start a local workflow run:
 
 ```bash

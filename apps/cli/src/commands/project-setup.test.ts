@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   doctorProject,
   initProject,
+  updateProject,
+  uninstallProject,
   type InitProjectOptions,
 } from "./project-setup.js";
 
@@ -95,6 +97,44 @@ describe("project initialization", () => {
     const result = await initProject({ ...options(), dryRun: true });
     expect(result.installed).toContain(".agents/skills/implementation/SKILL.md");
     await expect(readFile(join(projectRoot, ".aether", "config.yaml"), "utf8")).rejects.toThrow();
+  });
+
+  it("updates unchanged managed files when the bundled skill changes", async () => {
+    await initProject(options());
+    await writeFile(
+      join(skillsRoot, "engineering", "implementation", "scripts", "helper.js"),
+      "export const value = 2;\\n",
+      "utf8",
+    );
+
+    const result = await updateProject({ projectRoot, skillsRoot });
+    expect(result.updated).toContain(".agents/skills/implementation/scripts/helper.js");
+    expect(
+      await readFile(
+        join(projectRoot, ".agents", "skills", "implementation", "scripts", "helper.js"),
+        "utf8",
+      ),
+    ).toContain("value = 2");
+  });
+
+  it("uninstalls only unmodified managed files and preserves user edits", async () => {
+    await initProject(options());
+    const skillFile = join(projectRoot, ".agents", "skills", "implementation", "SKILL.md");
+    await writeFile(skillFile, "user-edited skill", "utf8");
+
+    const result = await uninstallProject(projectRoot);
+    expect(result.removed).toContain(".agents/skills/implementation/scripts/helper.js");
+    expect(result.preserved.some((item) => item.path.endsWith("/SKILL.md"))).toBe(true);
+    expect(await readFile(skillFile, "utf8")).toBe("user-edited skill");
+    await expect(readFile(join(projectRoot, ".aether", "config.yaml"), "utf8"))
+      .resolves.toContain("autonomy: balanced");
+  });
+
+  it("returns an empty result when uninstall has no managed manifest", async () => {
+    const result = await uninstallProject(projectRoot);
+    expect(result.removed).toEqual([]);
+    expect(result.preserved).toEqual([]);
+    expect(result.manifestRemoved).toBe(false);
   });
 
   it("doctor validates initialized config and managed file checksums", async () => {

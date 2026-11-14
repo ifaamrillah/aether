@@ -10,7 +10,7 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse, stringify } from "yaml";
 import { validateAetherContract } from "@aether/schemas";
@@ -663,4 +663,163 @@ export async function doctorProject(projectRoot: string): Promise<DoctorResult> 
     warnings: checks.filter((check) => check.status === "warning").length,
     failed: checks.filter((check) => check.status === "fail").length,
   };
+}
+ 
+
+export async function updateProject(options: {
+  projectRoot: string;
+  skillsRoot?: string;
+  dryRun?: boolean;
+  clock?: () => Date;
+}): Promise<InitProjectResult> {
+  const root = await realpath(resolve(options.projectRoot));
+  const configPath = resolve(root, ".aether", "config.yaml");
+  const content = await readFile(configPath, "utf8").catch((error: unknown) => {
+    throw new Error(
+      error instanceof Error && "code" in error && error.code === "ENOENT"
+        ? "Aether is not initialized here. Run aether init first."
+        : "Unable to read .aether/config.yaml.",
+    );
+  });
+
+  let parsed: unknown;
+  try {
+    parsed = parse(content, { prettyErrors: true, uniqueKeys: true });
+  } catch (error) {
+    throw new Error(
+      "Project configuration is invalid YAML: " +
+        (error instanceof Error ? error.message : "unknown parse error"),
+    );
+  }
+
+  const validation = validateAetherContract("project-config", parsed);
+  if (!validation.valid) {
+    throw new Error(
+      "Project configuration is invalid:\n" +
+        validation.errors.map((issue) => "- " + issue.path + ": " + issue.message).join("\n"),
+    );
+  }
+
+  const config = parsed as ProjectConfig;
+  const knownPlatforms = new Set<AdapterId>([
+    "generic",
+    "claude-code",
+    "codex",
+    "opencode",
+    "gemini-cli",
+    "antigravity",
+  ]);
+  const platforms = config.platforms.enabled.filter(
+    (platform): platform is AdapterId => knownPlatforms.has(platform as AdapterId),
+  );
+  if (platforms.length !== config.platforms.enabled.length || platforms.length === 0) {
+    throw new Error(
+      "Project config contains an unsupported or empty platform list. Update platforms.enabled before running aether update.",
+    );
+  }
+
+  return initProject({
+    projectRoot: root,
+    ...(options.skillsRoot === undefined ? {} : { skillsRoot: options.skillsRoot }),
+    platforms,
+    mode: config.project.mode,
+    dryRun: options.dryRun,
+    clock: options.clock,
+  });
+}
+
+export interface UninstallProjectResult {
+  removed: string[];
+  alreadyMissing: string[];
+  preserved: Array<{ path: string; reason: string }>;
+  manifestRemoved: boolean;
+}
+
+/**
+ * Removes only files recorded by Aether whose current checksum still matches
+ * the managed manifest. User-modified and untracked files are never deleted.
+ * Project configuration is preserved.
+ */
+export async function uninstallProject(
+  projectRoot: string,
+): Promise<UninstallProjectResult> {
+  const root = await realpath(resolve(projectRoot));
+  const manifest = await readManagedManifest(root);
+  const result: UninstallProjectResult = {
+    removed: [],
+    alreadyMissing: [],
+    preserved: [],
+    manifestRemoved: false,
+  };
+
+  if (!manifest) return result;
+
+  const remaining: ManagedFileRecord[] = [];
+  for (const record of manifest.files) {
+    const absolute = resolve(root, ...record.path.split("/"));
+    if (!isWithinRoot(root, absolute)) {
+      result.preserved.push({
+        path: record.path,
+        reason: "Managed path escaped the project root.",
+      });
+      remaining.push(record);
+      continue;
+    }
+
+    const entry = await lstat(absolute).catch(() => undefined);
+    if (!entry) {
+      result.alreadyMissing.push(record.path);
+      continue;
+    }
+    if (!entry.isFile() || entry.isSymbolicLink()) {
+      result.preserved.push({
+        path: record.path,
+        reason: "Path is no longer a regular file; it was preserved.",
+      });
+      remaining.push(record);
+      continue;
+    }
+
+    const actualPath = await realpath(absolute);
+    if (!isWithinRoot(root, actualPath)) {
+      result.preserved.push({
+        path: record.path,
+        reason: "Path resolves outside the project root; it was preserved.",
+      });
+      remaining.push(record);
+      continue;
+    }
+
+    const currentHash = sha256(await readFile(actualPath));
+    if (currentHash !== record.sha256) {
+      result.preserved.push({
+        path: record.path,
+        reason: "File was modified after Aether installed it; it was preserved.",
+      });
+      remaining.push(record);
+      continue;
+    }
+
+    await rm(actualPath);
+    result.removed.push(record.path);
+  }
+
+  const manifestPath = resolve(root, ".aether", "managed-files.json");
+  if (remaining.length === 0) {
+    await rm(manifestPath, { force: true });
+    result.manifestRemoved = true;
+  } else {
+    const nextManifest: ManagedFilesManifest = {
+      ...manifest,
+      files: remaining,
+      updated_at: new Date().toISOString(),
+    };
+    await atomicWrite(
+      root,
+      ".aether/managed-files.json",
+      Buffer.from(JSON.stringify(nextManifest, null, 2) + "\n", "utf8"),
+    );
+  }
+
+  return result;
 }
