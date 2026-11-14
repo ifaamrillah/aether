@@ -697,11 +697,12 @@ export class WorkflowRunService {
     };
 
     const writePaths = definition.scope?.write_paths ?? [];
-    for (const changedPath of validatedManifest.changed_files) {
-      if (
-        typeof changedPath !== "string" ||
-        !isWithinScope(changedPath, writePaths)
-      ) {
+    for (const rawChangedPath of validatedManifest.changed_files) {
+      const changedPath =
+        typeof rawChangedPath === "string"
+          ? rawChangedPath
+          : invalid("changed file path must be a string.");
+      if (!isWithinScope(changedPath, writePaths)) {
         invalid("changed file is outside the declared write scope.");
       }
       const changedAbsolute = await safeProjectPath(changedPath, "changed file");
@@ -719,37 +720,52 @@ export class WorkflowRunService {
     ];
 
     let hasPassingEvidence = false;
-    for (const item of validatedManifest.evidence) {
+    for (const rawEvidence of validatedManifest.evidence) {
+      if (typeof rawEvidence !== "object" || rawEvidence === null) {
+        invalid("evidence record must be an object.");
+      }
+      const record = rawEvidence as Record<string, unknown>;
+      const evidencePath =
+        typeof record.path === "string"
+          ? record.path
+          : invalid("evidence path must be a string.");
+      const evidenceSha =
+        typeof record.sha256 === "string"
+          ? record.sha256
+          : invalid("evidence checksum must be a string.");
+      const evidenceSize =
+        typeof record.size_bytes === "number"
+          ? record.size_bytes
+          : invalid("evidence size must be a number.");
+      const evidenceResult =
+        record.result === "passed" || record.result === "informational"
+          ? record.result
+          : invalid("evidence result is invalid.");
+      const evidenceType =
+        typeof record.type === "string"
+          ? record.type
+          : invalid("evidence type must be a string.");
+
       if (
-        typeof item !== "object" ||
-        item === null ||
-        !("path" in item) ||
-        typeof item.path !== "string" ||
-        !("sha256" in item) ||
-        typeof item.sha256 !== "string" ||
-        !/^[a-f0-9]{64}$/.test(item.sha256) ||
-        !("size_bytes" in item) ||
-        typeof item.size_bytes !== "number" ||
-        !("result" in item) ||
-        (item.result !== "passed" && item.result !== "informational") ||
-        !("type" in item) ||
-        typeof item.type !== "string" ||
-        !allowedEvidenceTypes.includes(item.type) ||
-        !isWithinScope(item.path, outputScope)
+        !/^[a-f0-9]{64}$/.test(evidenceSha) ||
+        !allowedEvidenceTypes.includes(evidenceType) ||
+        !isWithinScope(evidencePath, outputScope) ||
+        !Number.isSafeInteger(evidenceSize) ||
+        evidenceSize < 1
       ) {
         invalid("evidence record is malformed.");
       }
 
-      if (item.result === "passed") hasPassingEvidence = true;
-      const evidenceAbsolute = await safeProjectPath(item.path, "evidence file");
+      if (evidenceResult === "passed") hasPassingEvidence = true;
+      const evidenceAbsolute = await safeProjectPath(evidencePath, "evidence file");
       const evidenceStats = await stat(evidenceAbsolute);
-      if (!evidenceStats.isFile() || evidenceStats.size !== item.size_bytes || evidenceStats.size === 0) {
+      if (!evidenceStats.isFile() || evidenceStats.size !== evidenceSize) {
         invalid("evidence file size or type has changed.");
       }
       const evidenceDigest = createHash("sha256")
         .update(await readFile(evidenceAbsolute))
         .digest("hex");
-      if (evidenceDigest !== item.sha256) {
+      if (evidenceDigest !== evidenceSha) {
         invalid("evidence checksum no longer matches.");
       }
     }
