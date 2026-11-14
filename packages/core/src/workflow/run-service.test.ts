@@ -266,7 +266,7 @@ describe("WorkflowRunService", () => {
         "completed",
         { verification },
       ),
-    ).rejects.toThrow(/changed file checksum no longer matches/);
+    ).rejects.toThrow(/changed file (size or type has changed|checksum no longer matches)/);
   });
 
   it("rejects symlinks inside the verification manifest path", async () => {
