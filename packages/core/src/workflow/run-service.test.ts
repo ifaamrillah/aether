@@ -505,4 +505,81 @@ describe("WorkflowRunService", () => {
     ).rejects.toBeInstanceOf(WorkflowRunConflictError);
   });
 
+  it("schedules a conditional optional stage only when its expression is true", async () => {
+    const conditionalWorkflow: WorkflowDefinition = {
+      ...workflow,
+      stages: [
+        ...workflow.stages,
+        {
+          id: "ui-prototype",
+          skill: "prototyping",
+          required: false,
+          depends_on: ["discovery"],
+          condition: {
+            expression: {
+              op: "eq",
+              left: { ref: "input.include_docs" },
+              right: true,
+            },
+          },
+        },
+      ],
+    };
+    const created = await service.createRun(conditionalWorkflow, {
+      feature_description: "Add an optional prototype",
+      include_docs: true,
+    });
+    const started = await service.startRun(created.id, conditionalWorkflow);
+    expect(started.stages["ui-prototype"]?.status).toBe("pending");
+
+    await service.transitionStage(created.id, conditionalWorkflow, "discovery", "in_progress");
+    await service.transitionStage(created.id, conditionalWorkflow, "discovery", "verifying");
+    const discoveryDone = await service.transitionStage(
+      created.id,
+      conditionalWorkflow,
+      "discovery",
+      "completed",
+      { verification: await createVerification(created.id, "discovery") },
+    );
+    expect(discoveryDone.stages["ui-prototype"]?.status).toBe("ready");
+  });
+
+  it("skips a conditional optional stage when its expression is false", async () => {
+    const conditionalWorkflow: WorkflowDefinition = {
+      ...workflow,
+      stages: [
+        ...workflow.stages,
+        {
+          id: "ui-prototype",
+          skill: "prototyping",
+          required: false,
+          depends_on: ["discovery"],
+          condition: {
+            expression: {
+              op: "eq",
+              left: { ref: "input.include_docs" },
+              right: true,
+            },
+          },
+        },
+      ],
+    };
+    const created = await service.createRun(conditionalWorkflow, {
+      feature_description: "Do not create a prototype",
+      include_docs: false,
+    });
+    await service.startRun(created.id, conditionalWorkflow);
+    await service.transitionStage(created.id, conditionalWorkflow, "discovery", "in_progress");
+    await service.transitionStage(created.id, conditionalWorkflow, "discovery", "verifying");
+    const discoveryDone = await service.transitionStage(
+      created.id,
+      conditionalWorkflow,
+      "discovery",
+      "completed",
+      { verification: await createVerification(created.id, "discovery") },
+    );
+    expect(discoveryDone.stages["ui-prototype"]?.status).toBe("skipped");
+  });
+
+
 });

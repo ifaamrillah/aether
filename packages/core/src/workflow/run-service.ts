@@ -17,7 +17,8 @@ import {
   WorkflowInputValidationError,
   WorkflowRunConflictError,
 } from "./run-errors.js";
-import { validateWorkflowSemantics } from "./validate-workflow.js";
+import { getRequiredExecutionStageIds, validateWorkflowSemantics } from "./validate-workflow.js";
+import { evaluateWorkflowCondition } from "./condition.js";
 import type { WorkflowDefinition, WorkflowInputDefinition } from "./types.js";
 
 export interface WorkflowRunServiceOptions {
@@ -25,6 +26,8 @@ export interface WorkflowRunServiceOptions {
   projectId: string;
   clock?: () => Date;
   idFactory?: () => string;
+  projectContext?: Record<string, unknown>;
+  capabilities?: Record<string, unknown>;
 }
 
 export interface StageTransitionOptions {
@@ -171,6 +174,8 @@ export class WorkflowRunService {
   private readonly projectId: string;
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
+  private readonly projectContext: Record<string, unknown>;
+  private readonly capabilities: Record<string, unknown>;
 
   constructor(options: WorkflowRunServiceOptions) {
     if (!options.projectId.trim()) {
@@ -181,6 +186,8 @@ export class WorkflowRunService {
     this.projectId = options.projectId;
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? randomUUID;
+    this.projectContext = { ...(options.projectContext ?? {}), id: options.projectContext?.id ?? options.projectId };
+    this.capabilities = options.capabilities ?? {};
   }
 
   async createRun(
@@ -317,6 +324,27 @@ export class WorkflowRunService {
         }
 
         const targetStatus = event.payload.to;
+        if (definition.condition) {
+          const conditionResult = evaluateWorkflowCondition(
+            definition.condition,
+            this.conditionContext(snapshot),
+          );
+          if (targetStatus === "ready" && !conditionResult) {
+            throw new StateIntegrityError(
+              'Run "' + runId + '" recorded a conditional stage as ready when its condition was false.',
+            );
+          }
+          if (targetStatus === "skipped" && conditionResult) {
+            throw new StateIntegrityError(
+              'Run "' + runId + '" recorded a conditional stage as skipped when its condition was true.',
+            );
+          }
+          if (targetStatus === "skipped" && !this.dependenciesCompleted(definition, snapshot)) {
+            throw new StateIntegrityError(
+              'Run "' + runId + '" skipped a conditional stage before its dependencies completed.',
+            );
+          }
+        }
         if (
           targetStatus === "ready" &&
           !this.dependenciesCompleted(definition, snapshot)
@@ -537,6 +565,24 @@ export class WorkflowRunService {
     if (to === "skipped" && stageDefinition.required) {
       throw new WorkflowRunConflictError(
         'Required stage "' + stageId + '" cannot be skipped.',
+      );
+    }
+    if (to === "skipped" && stageDefinition.condition) {
+      if (!this.dependenciesCompleted(stageDefinition, snapshot)) {
+        throw new WorkflowRunConflictError(
+          'Conditional stage "' + stageId + '" cannot be skipped before its dependencies complete.',
+        );
+      }
+      if (evaluateWorkflowCondition(stageDefinition.condition, this.conditionContext(snapshot))) {
+        throw new WorkflowRunConflictError(
+          'Conditional stage "' + stageId + '" evaluated true and cannot be skipped.',
+        );
+      }
+    }
+    if (to === "ready" && stageDefinition.condition &&
+        !evaluateWorkflowCondition(stageDefinition.condition, this.conditionContext(snapshot))) {
+      throw new WorkflowRunConflictError(
+        'Conditional stage "' + stageId + '" evaluated false and cannot become ready.',
       );
     }
 
@@ -856,7 +902,7 @@ export class WorkflowRunService {
     workflow: WorkflowDefinition,
   ): Promise<WorkflowRunSnapshot> {
     let snapshot = initial;
-    const executionScope = this.requiredExecutionStageIds(workflow);
+    const executionScope = this.executionStageIds(workflow);
 
     for (const definition of workflow.stages) {
       if (!executionScope.has(definition.id)) continue;
@@ -864,17 +910,28 @@ export class WorkflowRunService {
       if (!stage || stage.status !== "pending") continue;
       if (!this.dependenciesCompleted(definition, snapshot)) continue;
 
+      const conditionPassed = definition.condition
+        ? evaluateWorkflowCondition(definition.condition, this.conditionContext(snapshot))
+        : true;
+      const targetStatus: StageStatus = conditionPassed ? "ready" : "skipped";
       const timestamp = this.timestamp();
       const next = transitionStageState(stage, {
-        to: "ready",
+        to: targetStatus,
         event_sequence: snapshot.last_event_sequence + 1,
         timestamp,
+        ...(!conditionPassed ? { reason: "Condition evaluated to false." } : {}),
       });
+      const payload: Record<string, unknown> = {
+        stage_id: definition.id,
+        to: targetStatus,
+      };
+      if (!conditionPassed) payload.reason = "Condition evaluated to false.";
+
       snapshot = await this.commitStageState(
         snapshot,
         next,
         "stage.transitioned",
-        { stage_id: definition.id, to: "ready" },
+        payload,
         timestamp,
       );
     }
@@ -888,25 +945,24 @@ export class WorkflowRunService {
    * feature explicitly selects them.
    */
   private requiredExecutionStageIds(workflow: WorkflowDefinition): Set<string> {
-    const definitions = new Map(
-      workflow.stages.map((stage) => [stage.id, stage] as const),
-    );
-    const required = new Set<string>();
+    return getRequiredExecutionStageIds(workflow);
+  }
 
-    const visit = (stageId: string): void => {
-      if (required.has(stageId)) return;
-      required.add(stageId);
-      const definition = definitions.get(stageId);
-      for (const dependency of definition?.depends_on ?? []) {
-        visit(dependency);
-      }
-    };
-
-    for (const stageId of workflow.completion.required_stages) {
-      visit(stageId);
+  private executionStageIds(workflow: WorkflowDefinition): Set<string> {
+    const execution = this.requiredExecutionStageIds(workflow);
+    for (const stage of workflow.stages) {
+      if (stage.condition) execution.add(stage.id);
     }
+    return execution;
+  }
 
-    return required;
+  private conditionContext(snapshot: WorkflowRunSnapshot) {
+    return {
+      inputs: snapshot.inputs,
+      project: this.projectContext,
+      capabilities: this.capabilities,
+      stages: snapshot.stages,
+    };
   }
 
   private dependenciesCompleted(
@@ -994,13 +1050,23 @@ export class WorkflowRunService {
     const requiredStatuses = workflow.completion.required_stages.map(
       (stageId) => snapshot.stages[stageId]?.status,
     );
-    const executionScope = this.requiredExecutionStageIds(workflow);
+    const executionScope = this.executionStageIds(workflow);
     const executionStages = [...executionScope]
       .map((stageId) => snapshot.stages[stageId])
       .filter((stage): stage is StageRunState => stage !== undefined);
 
+    const conditionalStatuses = workflow.stages
+      .filter((stage) => stage.condition)
+      .map((stage) => snapshot.stages[stage.id]?.status);
+    const requiredStagesCompleted = requiredStatuses.every(
+      (stageStatus) => stageStatus === "completed",
+    );
+    const conditionalStagesResolved = conditionalStatuses.every(
+      (stageStatus) => stageStatus === "completed" || stageStatus === "skipped",
+    );
+
     let status: RunStatus = "running";
-    if (requiredStatuses.every((stageStatus) => stageStatus === "completed")) {
+    if (requiredStagesCompleted && conditionalStagesResolved) {
       status = "completed";
     } else if (executionStages.some((stage) => stage.status === "awaiting_approval")) {
       status = "awaiting_approval";
