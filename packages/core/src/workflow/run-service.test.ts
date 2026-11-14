@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -41,6 +42,45 @@ const workflow: WorkflowDefinition = {
   },
 };
 
+async function createVerification(runId: string, stageId: string) {
+  const outputPath =
+    ".aether/handoffs/" + runId + "/" + stageId + "/output/test-report.txt";
+  const manifestPath =
+    ".aether/verification/" + runId + "/" + stageId + ".json";
+  const evidenceBytes = Buffer.from("Test evidence for " + stageId + "\n", "utf8");
+  const evidenceHash = createHash("sha256").update(evidenceBytes).digest("hex");
+  const result = {
+    schema_version: 1,
+    task_id: "task_" + runId + "_" + stageId,
+    run_id: runId,
+    stage_id: stageId,
+    summary: "Verified test evidence for " + stageId,
+    changed_files: [],
+    evidence: [{
+      path: outputPath,
+      type: "test_report",
+      result: "passed",
+      summary: "Fixture evidence",
+      sha256: evidenceHash,
+      size_bytes: evidenceBytes.length,
+    }],
+    verified_at: "2026-11-15T01:00:00.000Z",
+  };
+  const manifestContent = JSON.stringify(result, null, 2) + "\n";
+  await mkdir(join(projectRoot, ".aether", "handoffs", runId, stageId, "output"), { recursive: true });
+  await mkdir(join(projectRoot, ".aether", "verification", runId), { recursive: true });
+  await writeFile(join(projectRoot, outputPath), evidenceBytes);
+  await writeFile(join(projectRoot, manifestPath), manifestContent, "utf8");
+
+  return {
+    artifact_id: "verification-" + runId + "-" + stageId,
+    path: manifestPath,
+    status: "passed" as const,
+    evidence_count: result.evidence.length,
+    verified_at: result.verified_at,
+    sha256: createHash("sha256").update(manifestContent, "utf8").digest("hex"),
+  };
+}
 function createService(): WorkflowRunService {
   return new WorkflowRunService({
     projectRoot,
@@ -127,10 +167,54 @@ describe("WorkflowRunService", () => {
       workflow,
       "discovery",
       "completed",
+      { verification: await createVerification(created.id, "discovery") },
     );
     expect(completed.stages.discovery?.status).toBe("completed");
     expect(completed.stages.implementation?.status).toBe("ready");
     expect(completed.status).toBe("running");
+  });
+
+  it("does not complete a stage without a passed verification manifest", async () => {
+    const created = await service.createRun(workflow, {
+      feature_description: "Require evidence",
+    });
+    await service.startRun(created.id, workflow);
+    await service.transitionStage(created.id, workflow, "discovery", "in_progress");
+    await service.transitionStage(created.id, workflow, "discovery", "verifying");
+
+    await expect(
+      service.transitionStage(created.id, workflow, "discovery", "completed"),
+    ).rejects.toBeInstanceOf(WorkflowRunConflictError);
+  });
+
+  it("rejects a verification manifest whose evidence checksum has gone stale", async () => {
+    const created = await service.createRun(workflow, {
+      feature_description: "Detect tampered evidence",
+    });
+    await service.startRun(created.id, workflow);
+    await service.transitionStage(created.id, workflow, "discovery", "in_progress");
+    await service.transitionStage(created.id, workflow, "discovery", "verifying");
+    const verification = await createVerification(created.id, "discovery");
+    const evidencePath = join(
+      projectRoot,
+      ".aether",
+      "handoffs",
+      created.id,
+      "discovery",
+      "output",
+      "test-report.txt",
+    );
+    await writeFile(evidencePath, "Tampered after verification.", "utf8");
+
+    await expect(
+      service.transitionStage(
+        created.id,
+        workflow,
+        "discovery",
+        "completed",
+        { verification },
+      ),
+    ).rejects.toBeInstanceOf(WorkflowRunConflictError);
   });
 
   it("does not allow starting a dependent stage before its dependencies complete", async () => {
@@ -162,7 +246,10 @@ describe("WorkflowRunService", () => {
     await service.startRun(created.id, workflow);
     await service.transitionStage(created.id, workflow, "discovery", "in_progress");
     await service.transitionStage(created.id, workflow, "discovery", "verifying");
-    await service.transitionStage(created.id, workflow, "discovery", "completed");
+    await service.transitionStage(
+      created.id, workflow, "discovery", "completed",
+      { verification: await createVerification(created.id, "discovery") },
+    );
     await service.transitionStage(created.id, workflow, "implementation", "in_progress");
     await service.transitionStage(created.id, workflow, "implementation", "verifying");
 
@@ -171,6 +258,7 @@ describe("WorkflowRunService", () => {
       workflow,
       "implementation",
       "completed",
+      { verification: await createVerification(created.id, "implementation") },
     );
 
     expect(completed.status).toBe("completed");
@@ -264,6 +352,7 @@ describe("WorkflowRunService", () => {
       workflowWithOptionalDependency,
       "optional-setup",
       "completed",
+      { verification: await createVerification(created.id, "optional-setup") },
     );
     expect(done.stages.discovery?.status).toBe("ready");
     expect(done.status).toBe("running");

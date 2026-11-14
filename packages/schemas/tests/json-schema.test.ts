@@ -47,6 +47,94 @@ describe("canonical JSON Schemas", () => {
     }
   });
 
+  it("validates portable delegation and task result contracts", () => {
+    const ajv = new Ajv2020({ allErrors: true, strict: false });
+    addFormats(ajv);
+    for (const schema of schemas) ajv.addSchema(schema);
+
+    const validateDelegation = ajv.getSchema(
+      "https://aether.dev/schemas/delegation.schema.json",
+    );
+    const validateTaskResult = ajv.getSchema(
+      "https://aether.dev/schemas/task-result.schema.json",
+    );
+
+    expect(validateDelegation).toBeDefined();
+    expect(validateTaskResult).toBeDefined();
+
+    expect(validateDelegation?.({
+      schema_version: 1,
+      task_id: "task_run_123_discovery",
+      run_id: "run_123",
+      workflow_id: "feature-development",
+      workflow_version: 1,
+      stage_id: "discovery",
+      title: "Discover existing behavior",
+      objective: "Inspect the project and report relevant constraints.",
+      suggested_role: "Analyst",
+      adapter_id: "generic",
+      dependencies: [],
+      file_scope: {
+        read_paths: ["src/**"],
+        write_paths: ["docs/discovery/**"]
+      },
+      output_paths: [".aether/handoffs/run_123/discovery/output/**"],
+      acceptance_criteria: ["Record findings", "Attach evidence"],
+      expected_result_path: ".aether/handoffs/run_123/discovery/result.json",
+      created_at: "2026-11-15T01:00:00.000Z"
+    })).toBe(true);
+
+    expect(validateTaskResult?.({
+      schema_version: 1,
+      task_id: "task_run_123_discovery",
+      run_id: "run_123",
+      stage_id: "discovery",
+      summary: "Reviewed the existing project.",
+      changed_files: ["docs/discovery/summary.md"],
+      evidence: [{
+        path: ".aether/handoffs/run_123/discovery/output/report.md",
+        type: "documentation",
+        result: "passed",
+        summary: "Discovery notes"
+      }]
+    })).toBe(true);
+
+    expect(validateTaskResult?.({
+      schema_version: 1,
+      task_id: "task_run_123_discovery",
+      run_id: "run_123",
+      stage_id: "discovery",
+      summary: "Missing evidence",
+      changed_files: [],
+      evidence: []
+    })).toBe(false);
+  });
+
+  it("validates adapter capability descriptors without claiming native execution", () => {
+    const ajv = new Ajv2020({ allErrors: true, strict: false });
+    addFormats(ajv);
+    for (const schema of schemas) ajv.addSchema(schema);
+
+    const validateAdapter = ajv.getSchema(
+      "https://aether.dev/schemas/adapter.schema.json",
+    );
+    expect(validateAdapter).toBeDefined();
+
+    expect(validateAdapter?.({
+      schema_version: 1,
+      id: "generic",
+      name: "Generic Agent Handoff",
+      adapter_version: "0.1.0",
+      handoff_mode: "human-mediated",
+      supported_skill_format: ["agentskills"],
+      project_markers: [],
+      capabilities: [
+        { id: "agent_handoff", status: "supported" },
+        { id: "native_subagents", status: "unsupported" }
+      ]
+    })).toBe(true);
+  });
+
   it("accepts a minimal valid workflow definition", () => {
     const ajv = new Ajv2020({ allErrors: true, strict: false });
     addFormats(ajv);

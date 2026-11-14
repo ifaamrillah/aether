@@ -4,49 +4,204 @@
   "title": "Aether Workflow Run",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "id", "workflow_id", "workflow_version", "status", "project_id", "inputs", "stages", "current_stage_ids", "created_at", "updated_at", "last_event_sequence", "snapshot_sequence"],
+  "required": [
+    "schema_version",
+    "id",
+    "workflow_id",
+    "workflow_version",
+    "status",
+    "project_id",
+    "inputs",
+    "stages",
+    "current_stage_ids",
+    "created_at",
+    "updated_at",
+    "last_event_sequence",
+    "snapshot_sequence"
+  ],
   "properties": {
-    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
-    "id": { "$ref": "common.schema.json#/$defs/identifier" },
-    "workflow_id": { "$ref": "common.schema.json#/$defs/identifier" },
-    "workflow_version": { "type": "integer", "minimum": 1 },
-    "status": { "enum": ["created", "running", "paused", "blocked", "awaiting_approval", "completed", "failed", "cancelled"] },
-    "project_id": { "$ref": "common.schema.json#/$defs/identifier" },
-    "inputs": { "type": "object" },
-    "stages": { "type": "object", "additionalProperties": { "$ref": "#/$defs/stageState" } },
-    "current_stage_ids": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" },
-    "updated_at": { "$ref": "common.schema.json#/$defs/timestamp" },
-    "last_event_sequence": { "type": "integer", "minimum": 0 },
-    "snapshot_sequence": { "type": "integer", "minimum": 0 },
-    "artifact_manifest": { "$ref": "common.schema.json#/$defs/relativeProjectPath" }
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/identifier"
+    },
+    "workflow_id": {
+      "$ref": "common.schema.json#/$defs/identifier"
+    },
+    "workflow_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "status": {
+      "enum": [
+        "created",
+        "running",
+        "paused",
+        "blocked",
+        "awaiting_approval",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/identifier"
+    },
+    "inputs": {
+      "type": "object"
+    },
+    "stages": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/stageState"
+      }
+    },
+    "current_stage_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "last_event_sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "snapshot_sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "artifact_manifest": {
+      "$ref": "common.schema.json#/$defs/relativeProjectPath"
+    }
   },
   "$defs": {
     "artifactReference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["artifact_id", "path", "type"],
+      "required": [
+        "artifact_id",
+        "path",
+        "type"
+      ],
       "properties": {
-        "artifact_id": { "type": "string" },
-        "path": { "$ref": "common.schema.json#/$defs/relativeProjectPath" },
-        "type": { "type": "string" }
+        "artifact_id": {
+          "type": "string"
+        },
+        "path": {
+          "$ref": "common.schema.json#/$defs/relativeProjectPath"
+        },
+        "type": {
+          "type": "string"
+        }
       }
     },
     "stageState": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["stage_id", "status", "attempt", "inputs", "outputs", "last_event_sequence"],
+      "required": [
+        "stage_id",
+        "status",
+        "attempt",
+        "inputs",
+        "outputs",
+        "last_event_sequence"
+      ],
       "properties": {
-        "stage_id": { "type": "string" },
-        "status": { "enum": ["pending", "ready", "in_progress", "blocked", "awaiting_approval", "verifying", "completed", "failed", "skipped", "stale"] },
-        "attempt": { "type": "integer", "minimum": 0 },
-        "inputs": { "type": "array", "items": { "$ref": "#/$defs/artifactReference" } },
-        "outputs": { "type": "array", "items": { "$ref": "#/$defs/artifactReference" } },
-        "started_at": { "$ref": "common.schema.json#/$defs/timestamp" },
-        "completed_at": { "$ref": "common.schema.json#/$defs/timestamp" },
-        "blocked_reason": { "type": "string" },
-        "approval_id": { "type": "string" },
-        "last_event_sequence": { "type": "integer", "minimum": 0 }
+        "stage_id": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "ready",
+            "in_progress",
+            "blocked",
+            "awaiting_approval",
+            "verifying",
+            "completed",
+            "failed",
+            "skipped",
+            "stale"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifactReference"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifactReference"
+          }
+        },
+        "started_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "completed_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "blocked_reason": {
+          "type": "string"
+        },
+        "approval_id": {
+          "type": "string"
+        },
+        "last_event_sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "verification": {
+          "$ref": "#/$defs/stageVerification"
+        }
+      }
+    },
+    "stageVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "path",
+        "status",
+        "evidence_count",
+        "verified_at",
+        "sha256"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "$ref": "common.schema.json#/$defs/relativeProjectPath"
+        },
+        "status": {
+          "const": "passed"
+        },
+        "evidence_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "verified_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
       }
     }
   }

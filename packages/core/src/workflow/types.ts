@@ -13,6 +13,11 @@ export interface WorkflowStageDefinition {
   name?: string;
   description?: string;
   depends_on?: string[];
+  scope?: {
+    read_paths?: string[];
+    write_paths?: string[];
+  };
+  acceptance_criteria?: string[];
 }
 
 export interface WorkflowDefinition {

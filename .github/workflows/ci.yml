@@ -31,6 +31,31 @@ jobs:
           echo "$output"
           run_id="$(printf '%s\n' "$output" | sed -n 's/^Run: //p' | head -n 1)"
           test -n "$run_id"
+          node apps/cli/dist/index.js workflow handoff "$run_id" --file workflows/feature.yaml --adapter generic
+          test -f ".aether/handoffs/$run_id/discovery/HANDOFF.md"
+          mkdir -p ".aether/handoffs/$run_id/discovery/output"
+          printf 'CI evidence: discovery artifact created\n' > ".aether/handoffs/$run_id/discovery/output/test-report.txt"
+          node - ".aether/handoffs/$run_id/discovery/task.json" ".aether/handoffs/$run_id/discovery/result.json" "$run_id" <<'NODE'
+          const fs = require("node:fs");
+          const task = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const runId = process.argv[4];
+          const result = {
+            schema_version: 1,
+            task_id: task.task_id,
+            run_id: task.run_id,
+            stage_id: task.stage_id,
+            summary: "CI smoke test completed the discovery handoff.",
+            changed_files: [],
+            evidence: [{
+              path: ".aether/handoffs/" + runId + "/discovery/output/test-report.txt",
+              type: "test_report",
+              result: "passed",
+              summary: "CI created this non-empty evidence fixture."
+            }]
+          };
+          fs.writeFileSync(process.argv[3], JSON.stringify(result, null, 2));
+          NODE
+          node apps/cli/dist/index.js workflow accept "$run_id" --file workflows/feature.yaml --stage discovery --result ".aether/handoffs/$run_id/discovery/result.json"
           node apps/cli/dist/index.js workflow status "$run_id"
           node apps/cli/dist/index.js workflow pause "$run_id"
           node apps/cli/dist/index.js workflow resume "$run_id" --file workflows/feature.yaml

@@ -2,7 +2,9 @@
 
 Canonical public contracts live in `json-schema/` and use JSON Schema Draft 2020-12.
 
-JSON Schema validates data shape. Core semantic validators must additionally check workflow stage references and dependency cycles, state transition legality, run/event sequence consistency, task dependency integrity and file-scope conflicts, artifact ID/path consistency, approval binding to an exact action digest, and filesystem path containment after normalization.
+The schemas cover workflow definitions, run state, task contracts, delegation handoffs, task result submissions, adapter descriptors, events, approvals, and project configuration.
+
+JSON Schema validates data shape. Core semantic validators additionally check cross-references, dependency cycles, state transitions, event sequences, run/workflow version identity, path containment, task file scope, evidence output location, approval binding, and verification manifest integrity.
 
 Never use `eval` to evaluate workflow conditions. Conditions must be interpreted by a restricted deterministic evaluator.
 

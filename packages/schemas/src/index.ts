@@ -32,13 +32,8 @@ function unwrapDefault<T>(moduleValue: unknown): T {
   return moduleValue as T;
 }
 
-// createRequire handles Ajv's CommonJS-compatible exports under NodeNext.
-const Ajv2020 = unwrapDefault<AjvConstructor>(
-  require("ajv/dist/2020.js"),
-);
-const addFormats = unwrapDefault<AddFormats>(
-  require("ajv-formats"),
-);
+const Ajv2020 = unwrapDefault<AjvConstructor>(require("ajv/dist/2020.js"));
+const addFormats = unwrapDefault<AddFormats>(require("ajv-formats"));
 
 export interface SchemaValidationIssue {
   path: string;
@@ -51,17 +46,65 @@ export interface SchemaValidationResult {
   errors: SchemaValidationIssue[];
 }
 
+export type ContractSchemaName =
+  | "workflow"
+  | "run"
+  | "event"
+  | "task"
+  | "approval"
+  | "project-config"
+  | "adapter"
+  | "delegation"
+  | "task-result";
+
 function loadSchema(name: string): object {
-  const fileUrl = new URL(`../json-schema/${name}`, import.meta.url);
+  const fileUrl = new URL("../json-schema/" + name + ".schema.json", import.meta.url);
   return JSON.parse(readFileSync(fileUrl, "utf8")) as object;
 }
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 addFormats(ajv);
+ajv.addSchema(loadSchema("common"));
 
-ajv.addSchema(loadSchema("common.schema.json"));
+const schemaNames: ContractSchemaName[] = [
+  "workflow",
+  "run",
+  "event",
+  "task",
+  "approval",
+  "project-config",
+  "adapter",
+  "delegation",
+  "task-result",
+];
 
-const validateWorkflow = ajv.compile(loadSchema("workflow.schema.json"));
+const validators = new Map<ContractSchemaName, CompiledValidator>();
+for (const name of schemaNames) {
+  validators.set(name, ajv.compile(loadSchema(name)));
+}
+
+export function validateAetherContract(
+  schemaName: ContractSchemaName,
+  value: unknown,
+): SchemaValidationResult {
+  const validator = validators.get(schemaName);
+  if (!validator) {
+    return {
+      valid: false,
+      errors: [{ path: "/", keyword: "schema", message: "Unknown Aether contract schema." }],
+    };
+  }
+
+  const valid = validator(value);
+  return {
+    valid,
+    errors: (validator.errors ?? []).map((error) => ({
+      path: error.instancePath || "/",
+      keyword: error.keyword,
+      message: error.message ?? "Schema validation failed.",
+    })),
+  };
+}
 
 /**
  * Validates the structural contract of a workflow definition.
@@ -70,14 +113,29 @@ const validateWorkflow = ajv.compile(loadSchema("workflow.schema.json"));
 export function validateWorkflowDefinition(
   value: unknown,
 ): SchemaValidationResult {
-  const valid = validateWorkflow(value);
+  return validateAetherContract("workflow", value);
+}
 
-  return {
-    valid,
-    errors: (validateWorkflow.errors ?? []).map((error) => ({
-      path: error.instancePath || "/",
-      keyword: error.keyword,
-      message: error.message ?? "Schema validation failed.",
-    })),
-  };
+export function validateDelegationContract(
+  value: unknown,
+): SchemaValidationResult {
+  return validateAetherContract("delegation", value);
+}
+
+export function validateTaskResultSubmission(
+  value: unknown,
+): SchemaValidationResult {
+  return validateAetherContract("task-result", value);
+}
+
+export function validateAgentAdapterDescriptor(
+  value: unknown,
+): SchemaValidationResult {
+  return validateAetherContract("adapter", value);
+}
+
+export function validateWorkflowRunSnapshot(
+  value: unknown,
+): SchemaValidationResult {
+  return validateAetherContract("run", value);
 }

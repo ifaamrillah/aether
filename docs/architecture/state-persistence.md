@@ -55,6 +55,12 @@ console.log(loaded.pendingEvents);
 
 Creating a run requires an initial snapshot and its sequence-1 event. Appending events and writing snapshots are separate operations so that callers can define domain-specific transitions. A snapshot may only be written when it incorporates the latest persisted event.
 
+## Evidence-backed stage completion
+
+A stage snapshot may include a `verification` reference. The reference contains the project-relative verification manifest path, artifact ID, evidence count, verification timestamp, and SHA-256 digest. Before the stage can be marked completed, WorkflowRunService re-reads the manifest and evidence files, verifies run/stage/task identity, checks the declared write scope and task output directory, and recomputes evidence checksums. A fresh stage attempt clears the previous verification reference.
+
+This check proves the referenced files have not changed since verification. It does not prove the semantic truth of the report or independently prove that a test command ran.
+
 ## Recovery boundaries
 
 The event append and snapshot replacement occur under one per-run lock, but they are two durable filesystem writes. A process crash between them can leave a valid event beyond the snapshot sequence. The recovery service can replay supported event types and publish a new snapshot. If the event is malformed or unknown, recovery stops and preserves the event log for inspection.

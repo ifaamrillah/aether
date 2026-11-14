@@ -36,8 +36,9 @@ The CLI does not execute platform agents yet. It prepares and persists eligible 
 4. Replay run-status changes only when their recorded prior status matches the reconstructed state.
 5. Replay stage transitions through the canonical stage transition state machine.
 6. Validate stage dependencies and skip restrictions for replayed transitions.
-7. Write the reconstructed snapshot only after the complete pending event batch has replayed successfully.
-8. If the resulting run is running, reconcile eligible pending stages that were not promoted before interruption.
+7. For a completion event, revalidate the persisted verification manifest and its evidence checksums.
+8. Write the reconstructed snapshot only after the complete pending event batch has replayed successfully.
+9. If the resulting run is running, reconcile eligible pending stages that were not promoted before interruption.
 
 The reducer is intentionally strict. Unknown event types, malformed payloads, or impossible transitions stop recovery without changing the stored snapshot or deleting event history.
 

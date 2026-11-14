@@ -26,6 +26,15 @@ export interface ArtifactReference {
   type: string;
 }
 
+export interface StageVerificationReference {
+  artifact_id: string;
+  path: string;
+  status: "passed";
+  evidence_count: number;
+  verified_at: string;
+  sha256: string;
+}
+
 export interface StageRunState {
   stage_id: string;
   status: StageStatus;
@@ -36,6 +45,7 @@ export interface StageRunState {
   completed_at?: string;
   blocked_reason?: string;
   approval_id?: string;
+  verification?: StageVerificationReference;
   last_event_sequence: number;
 }
 

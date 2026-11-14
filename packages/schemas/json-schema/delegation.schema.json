@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aether.dev/schemas/delegation.schema.json",
+  "title": "Aether Stage Delegation Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "run_id",
+    "workflow_id",
+    "workflow_version",
+    "stage_id",
+    "title",
+    "objective",
+    "suggested_role",
+    "adapter_id",
+    "dependencies",
+    "file_scope",
+    "output_paths",
+    "acceptance_criteria",
+    "expected_result_path",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "task_id": { "$ref": "common.schema.json#/$defs/identifier" },
+    "run_id": { "$ref": "common.schema.json#/$defs/identifier" },
+    "workflow_id": { "$ref": "common.schema.json#/$defs/identifier" },
+    "workflow_version": { "type": "integer", "minimum": 1 },
+    "stage_id": { "$ref": "common.schema.json#/$defs/identifier" },
+    "title": { "type": "string", "minLength": 1 },
+    "objective": { "type": "string", "minLength": 1 },
+    "suggested_role": { "type": "string", "minLength": 1 },
+    "adapter_id": { "type": "string", "enum": ["generic", "claude-code", "codex", "opencode"] },
+    "dependencies": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/identifier" },
+      "uniqueItems": true
+    },
+    "file_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["read_paths", "write_paths"],
+      "properties": {
+        "read_paths": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/relativeProjectPath" },
+          "uniqueItems": true
+        },
+        "write_paths": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/relativeProjectPath" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "output_paths": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "common.schema.json#/$defs/relativeProjectPath" },
+      "uniqueItems": true
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "expected_result_path": { "$ref": "common.schema.json#/$defs/relativeProjectPath" },
+    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+  }
+}

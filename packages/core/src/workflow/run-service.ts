@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { FileStateStore } from "../state/file-state-store.js";
 import type {
   RunStatus,
@@ -6,6 +8,7 @@ import type {
   StageStatus,
   WorkflowEvent,
   WorkflowRunSnapshot,
+  StageVerificationReference,
 } from "../state/types.js";
 import { transitionStageState } from "../state/stage-transitions.js";
 import { StateIntegrityError } from "../state/errors.js";
@@ -26,6 +29,7 @@ export interface WorkflowRunServiceOptions {
 
 export interface StageTransitionOptions {
   reason?: string;
+  verification?: StageVerificationReference;
 }
 
 const ACTIVE_STAGE_STATUSES = new Set<StageStatus>([
@@ -163,6 +167,7 @@ function eventActor(): WorkflowEvent["actor"] {
 
 export class WorkflowRunService {
   private readonly store: FileStateStore;
+  private readonly projectRoot: string;
   private readonly projectId: string;
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
@@ -171,7 +176,8 @@ export class WorkflowRunService {
     if (!options.projectId.trim()) {
       throw new Error("WorkflowRunService requires a non-empty projectId.");
     }
-    this.store = new FileStateStore(options.projectRoot);
+    this.projectRoot = resolve(options.projectRoot);
+    this.store = new FileStateStore(this.projectRoot);
     this.projectId = options.projectId;
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? randomUUID;
@@ -345,6 +351,16 @@ export class WorkflowRunService {
             ? { reason: event.payload.reason }
             : {}),
         });
+        if (targetStatus === "completed") {
+          const verification = event.payload.verification as StageVerificationReference | undefined;
+          if (!verification) {
+            throw new StateIntegrityError(
+              'Run "' + runId + '" contains a completion event without verification evidence.',
+            );
+          }
+          await this.assertVerificationManifest(runId, stageId, definition, verification);
+          nextStage.verification = verification;
+        }
         const stages = { ...snapshot.stages, [stageId]: nextStage };
         snapshot = {
           ...snapshot,
@@ -524,6 +540,16 @@ export class WorkflowRunService {
       );
     }
 
+    if (to === "completed") {
+      const verification = options.verification ?? currentStage.verification;
+      if (!verification) {
+        throw new WorkflowRunConflictError(
+          'Stage "' + stageId + '" cannot complete without a verified evidence manifest.',
+        );
+      }
+      await this.assertVerificationManifest(runId, stageId, stageDefinition, verification);
+    }
+
     const timestamp = this.timestamp();
     const nextStage = transitionStageState(currentStage, {
       to,
@@ -534,6 +560,11 @@ export class WorkflowRunService {
 
     const payload: Record<string, unknown> = { stage_id: stageId, to };
     if (options.reason !== undefined) payload.reason = options.reason;
+    if (to === "completed") {
+      const verification = options.verification ?? currentStage.verification!;
+      nextStage.verification = verification;
+      payload.verification = verification;
+    }
 
     snapshot = await this.commitStageState(
       snapshot,
@@ -548,6 +579,175 @@ export class WorkflowRunService {
     }
 
     return this.refreshRunStatus(snapshot, workflow);
+  }
+
+  /**
+   * Re-checks a persisted verification manifest at the trust boundary.
+   * A caller cannot complete a stage by constructing a "passed" object:
+   * the manifest must exist inside the project, match its SHA-256 reference,
+   * identify this exact run and stage, and still point at unchanged evidence.
+   */
+  private async assertVerificationManifest(
+    runId: string,
+    stageId: string,
+    definition: WorkflowDefinition["stages"][number],
+    verification: StageVerificationReference,
+  ): Promise<void> {
+    const invalid = (message: string): never => {
+      throw new WorkflowRunConflictError(
+        'Verification for stage "' + stageId + '" is invalid: ' + message,
+      );
+    };
+
+    if (
+      typeof verification.path !== "string" ||
+      verification.path !== ".aether/verification/" + runId + "/" + stageId + ".json" ||
+      typeof verification.artifact_id !== "string" ||
+      verification.artifact_id !== "verification-" + runId + "-" + stageId ||
+      verification.status !== "passed" ||
+      !Number.isSafeInteger(verification.evidence_count) ||
+      verification.evidence_count < 1 ||
+      typeof verification.sha256 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(verification.sha256) ||
+      typeof verification.verified_at !== "string" ||
+      !Number.isFinite(Date.parse(verification.verified_at))
+    ) {
+      invalid("verification reference is malformed.");
+    }
+
+    const root = await realpath(this.projectRoot);
+    const safeProjectPath = async (path: string, label: string): Promise<string> => {
+      if (
+        typeof path !== "string" ||
+        path.length === 0 ||
+        path.includes(String.fromCharCode(92)) ||
+        isAbsolute(path) ||
+        /^[A-Za-z]:/.test(path) ||
+        path.split("/").some((part) => part === "" || part === "." || part === "..")
+      ) {
+        invalid(label + " is not a safe relative project path.");
+      }
+
+      const absolute = resolve(root, ...path.split("/"));
+      const actual = await realpath(absolute).catch(() => invalid(label + " does not exist."));
+      const rel = relative(root, actual);
+      if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) {
+        invalid(label + " resolves outside the project root.");
+      }
+      return actual;
+    };
+
+    const manifestPath = await safeProjectPath(verification.path, "manifest");
+    const manifestStats = await stat(manifestPath);
+    if (!manifestStats.isFile()) invalid("manifest is not a regular file.");
+
+    const manifestBytes = await readFile(manifestPath);
+    const manifestDigest = createHash("sha256").update(manifestBytes).digest("hex");
+    if (manifestDigest !== verification.sha256) {
+      invalid("manifest checksum does not match.");
+    }
+
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(manifestBytes.toString("utf8")) as unknown;
+    } catch {
+      invalid("manifest contains invalid JSON.");
+    }
+
+    if (
+      typeof manifest !== "object" ||
+      manifest === null ||
+      !("schema_version" in manifest) ||
+      manifest.schema_version !== 1 ||
+      !("run_id" in manifest) ||
+      manifest.run_id !== runId ||
+      !("stage_id" in manifest) ||
+      manifest.stage_id !== stageId ||
+      !("task_id" in manifest) ||
+      typeof manifest.task_id !== "string" ||
+      manifest.task_id !== "task_" + runId + "_" + stageId ||
+      !("summary" in manifest) ||
+      typeof manifest.summary !== "string" ||
+      !manifest.summary.trim() ||
+      !("changed_files" in manifest) ||
+      !Array.isArray(manifest.changed_files) ||
+      !("evidence" in manifest) ||
+      !Array.isArray(manifest.evidence) ||
+      manifest.evidence.length !== verification.evidence_count ||
+      !("verified_at" in manifest) ||
+      manifest.verified_at !== verification.verified_at
+    ) {
+      invalid("manifest identity or required fields do not match.");
+    }
+
+    const isWithinScope = (path: string, patterns: string[]): boolean =>
+      patterns.some((pattern) => {
+        if (pattern === "**" || pattern === "**/*") return true;
+        if (pattern.endsWith("/**")) {
+          const prefix = pattern.slice(0, -3);
+          return path === prefix || path.startsWith(prefix + "/");
+        }
+        return path === pattern;
+      });
+
+    const writePaths = definition.scope?.write_paths ?? [];
+    for (const changedPath of manifest.changed_files) {
+      if (
+        typeof changedPath !== "string" ||
+        !isWithinScope(changedPath, writePaths)
+      ) {
+        invalid("changed file is outside the declared write scope.");
+      }
+      const changedAbsolute = await safeProjectPath(changedPath, "changed file");
+      if (!(await stat(changedAbsolute)).isFile()) {
+        invalid("changed file is not a regular file.");
+      }
+    }
+
+    const outputScope = [
+      ".aether/handoffs/" + runId + "/" + stageId + "/output/**",
+    ];
+    const allowedEvidenceTypes = [
+      "test_report", "build_log", "screenshot", "trace", "review_record",
+      "security_scan", "design_artifact", "documentation", "other",
+    ];
+
+    let hasPassingEvidence = false;
+    for (const item of manifest.evidence) {
+      if (
+        typeof item !== "object" ||
+        item === null ||
+        !("path" in item) ||
+        typeof item.path !== "string" ||
+        !("sha256" in item) ||
+        typeof item.sha256 !== "string" ||
+        !/^[a-f0-9]{64}$/.test(item.sha256) ||
+        !("size_bytes" in item) ||
+        typeof item.size_bytes !== "number" ||
+        !("result" in item) ||
+        (item.result !== "passed" && item.result !== "informational") ||
+        !("type" in item) ||
+        typeof item.type !== "string" ||
+        !allowedEvidenceTypes.includes(item.type) ||
+        !isWithinScope(item.path, outputScope)
+      ) {
+        invalid("evidence record is malformed.");
+      }
+
+      if (item.result === "passed") hasPassingEvidence = true;
+      const evidenceAbsolute = await safeProjectPath(item.path, "evidence file");
+      const evidenceStats = await stat(evidenceAbsolute);
+      if (!evidenceStats.isFile() || evidenceStats.size !== item.size_bytes || evidenceStats.size === 0) {
+        invalid("evidence file size or type has changed.");
+      }
+      const evidenceDigest = createHash("sha256")
+        .update(await readFile(evidenceAbsolute))
+        .digest("hex");
+      if (evidenceDigest !== item.sha256) {
+        invalid("evidence checksum no longer matches.");
+      }
+    }
+    if (!hasPassingEvidence) invalid("at least one evidence record must report a passed result.");
   }
 
   private async loadConsistentRun(

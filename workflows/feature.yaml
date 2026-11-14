@@ -13,30 +13,75 @@ stages:
   - id: discovery
     skill: discovery
     required: true
+    scope:
+      read_paths:
+        - src/**
+        - docs/**
+      write_paths:
+        - docs/discovery/**
+    acceptance_criteria:
+      - Summarize relevant existing behavior and constraints.
+      - Record findings in the task output evidence directory.
 
   - id: specification
     skill: specification
     required: true
     depends_on:
       - discovery
+    scope:
+      read_paths:
+        - docs/discovery/**
+        - src/**
+      write_paths:
+        - docs/specifications/**
+    acceptance_criteria:
+      - Define functional behavior and acceptance criteria.
+      - Identify relevant data and interface contracts.
 
   - id: planning
     skill: implementation-planning
     required: true
     depends_on:
       - specification
+    scope:
+      read_paths:
+        - docs/specifications/**
+        - src/**
+      write_paths:
+        - docs/plans/**
+    acceptance_criteria:
+      - Break implementation into dependency-aware tasks.
+      - Identify affected files and test strategy.
 
   - id: implementation
     skill: implementation
     required: true
     depends_on:
       - planning
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+        - docs/specifications/**
+      write_paths:
+        - src/**
+        - tests/**
+    acceptance_criteria:
+      - Implement the approved specification within the declared write scope.
+      - Add or update relevant automated tests.
+      - Provide test execution evidence.
 
   - id: verification
     skill: testing
     required: true
     depends_on:
       - implementation
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+      write_paths:
+        - docs/reports/**
 
 completion:
   required_stages:

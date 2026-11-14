@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aether.dev/schemas/adapter.schema.json",
+  "title": "Aether Agent Adapter Descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "adapter_version",
+    "handoff_mode",
+    "supported_skill_format",
+    "capabilities",
+    "project_markers"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "id": {
+      "enum": [
+        "generic",
+        "claude-code",
+        "codex",
+        "opencode",
+        "gemini-cli",
+        "antigravity"
+      ]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "adapter_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoff_mode": {
+      "const": "human-mediated"
+    },
+    "supported_skill_format": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "native",
+              "supported",
+              "degraded",
+              "unsupported"
+            ]
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "project_markers": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/relativeProjectPath"
+      },
+      "uniqueItems": true
+    }
+  }
+}

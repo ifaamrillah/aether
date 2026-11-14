@@ -44,14 +44,38 @@ node apps/cli/dist/index.js workflow run workflows/feature.yaml \
   --input 'feature_description=Add account settings'
 ```
 
-The CLI persists run state under `.aether/runs/`. Use the printed run ID with `workflow status`, `workflow pause`, `workflow resume --file <workflow-file>`, `workflow recover --file <workflow-file>`, or `workflow cancel`.
+The CLI persists run state under `.aether/runs/`. It also prepares portable task handoffs for ready stages and verifies agent-submitted results before a stage can complete.
 
-The current CLI manages workflow lifecycle and prepares eligible stages; platform-native agent execution is not wired into this command yet.
+Prepare handoffs for a run:
+
+```bash
+node apps/cli/dist/index.js workflow handoff <run-id> --file workflows/feature.yaml --adapter claude-code
+```
+
+Each ready stage receives a task contract and `HANDOFF.md` under `.aether/handoffs/<run-id>/<stage-id>/`. Select `generic`, `claude-code`, `codex`, `opencode`, `gemini-cli`, or `antigravity`. These adapters prepare human-mediated handoffs; they do not launch platform agents.
+
+After the agent has worked, create the task result JSON at the path specified by the handoff and attach evidence files inside the project. Accept and verify the result:
+
+```bash
+node apps/cli/dist/index.js workflow accept <run-id> \
+  --file workflows/feature.yaml \
+  --stage discovery \
+  --result .aether/handoffs/<run-id>/discovery/result.json
+```
+
+Aether checks task identity, write-scope compliance, evidence file existence, project path containment, and SHA-256 checksums. At least one evidence record must report a passed result. A passed verification manifest is persisted under `.aether/verification/`; Core re-checks its checksum, task identity, changed-file scope, and current evidence hashes before a stage can transition to completed.
+
+Hashes prove file integrity, not the truth of an agent's report or that a test command really ran. The current adapter does not independently execute tests.
+
+Use the run ID with `workflow status`, `workflow pause`, `workflow resume --file <workflow-file>`, `workflow recover --file <workflow-file>`, or `workflow cancel`.
+
+The current adapters produce portable instructions and collect results. They do not yet execute native subagents, enforce OS-level file permissions, or independently rerun every test command.
 
 ## Repository layout
 
 - `apps/cli`: developer interface
-- `packages/core`: workflow planning, file-backed run state, and event history
+- `packages/core`: workflow planning, file-backed run state, delegation contracts, and evidence verification
+- `packages/adapters`: portable handoff adapters for generic agents, Claude Code, Codex, OpenCode, Gemini CLI, and Antigravity
 - `packages/schemas`: canonical JSON Schema contracts and structural validation
 - `skills`: portable Agent Skills
 - `workflows`: declarative workflow definitions
