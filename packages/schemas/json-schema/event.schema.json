@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aether.dev/schemas/event.schema.json",
+  "title": "Aether Workflow Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "run_id", "sequence", "type", "timestamp", "actor", "entity", "payload"],
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "event_id": { "$ref": "common.schema.json#/$defs/identifier" },
+    "run_id": { "$ref": "common.schema.json#/$defs/identifier" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "type": { "type": "string", "minLength": 1 },
+    "timestamp": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": { "type": { "enum": ["user", "agent", "system"] }, "id": { "type": "string" } }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": { "type": { "type": "string" }, "id": { "type": "string" } }
+    },
+    "payload": { "type": "object" },
+    "correlation_id": { "type": "string" }
+  }
+}
