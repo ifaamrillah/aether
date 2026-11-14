@@ -42,7 +42,7 @@ describe("validateWorkflowContent", () => {
     expect(result.ok).toBe(false);
 
     if (!result.ok) {
-      expect(result.errors.join("\n")).toContain("unknown_required_stage");
+      expect(result.errors.join("\n")).toContain("unknown_dependency");
     }
   });
 
