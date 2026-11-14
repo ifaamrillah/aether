@@ -690,8 +690,14 @@ export class WorkflowRunService {
         return path === pattern;
       });
 
+    // Narrow the parsed JSON only after the runtime shape checks above pass.
+    const validatedManifest = manifest as {
+      changed_files: unknown[];
+      evidence: unknown[];
+    };
+
     const writePaths = definition.scope?.write_paths ?? [];
-    for (const changedPath of manifest.changed_files) {
+    for (const changedPath of validatedManifest.changed_files) {
       if (
         typeof changedPath !== "string" ||
         !isWithinScope(changedPath, writePaths)
@@ -713,7 +719,7 @@ export class WorkflowRunService {
     ];
 
     let hasPassingEvidence = false;
-    for (const item of manifest.evidence) {
+    for (const item of validatedManifest.evidence) {
       if (
         typeof item !== "object" ||
         item === null ||
