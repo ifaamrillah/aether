@@ -10,7 +10,7 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
-import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse, stringify } from "yaml";
 import { validateAetherContract } from "@aether/schemas";
@@ -723,8 +723,8 @@ export async function updateProject(options: {
     ...(options.skillsRoot === undefined ? {} : { skillsRoot: options.skillsRoot }),
     platforms,
     mode: config.project.mode,
-    dryRun: options.dryRun,
-    clock: options.clock,
+    ...(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
   });
 }
 
