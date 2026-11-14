@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./condition.js";
 export * from "./validate-workflow.js";
 export * from "./run-errors.js";
 export * from "./run-service.js";
