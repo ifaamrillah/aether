@@ -30,11 +30,13 @@ import {
   validateWorkflowContent,
 } from "./commands/workflow-validate.js";
 import { parseWorkflowRunOptions } from "./commands/workflow-inputs.js";
+import { listWorkflowFiles } from "./commands/workflow-files.js";
 import { validateSkills } from "./commands/skill-validate.js";
 import {
   doctorProject,
   initProject,
   resolveBundledSkillsRoot,
+  resolveBundledWorkflowsRoot,
   uninstallProject,
   updateProject,
 } from "./commands/project-setup.js";
@@ -52,6 +54,7 @@ Commands:
   uninstall [--project <path>]                 Remove unchanged managed files; preserve project config
   doctor [--project <path>]                    Check Aether configuration and managed files
   workflow validate <file>                    Validate workflow YAML and show execution waves
+  workflow list [directory]                   List validated workflows (default: workflows/aether)
   skill validate [path]                        Validate portable Agent Skills (default: skills/)
   platform list                                List adapter capabilities and skill paths
   platform detect [--project <path>]           Detect platform markers in a project
@@ -71,6 +74,7 @@ Init options:
   --mode greenfield|brownfield                 Project type (default: brownfield)
   --project <path>                             Target project (default: current directory)
   --skills <path>                              Source skill bundle (default: bundled Aether skills)
+  --workflows <path>                           Source workflow bundle (default: bundled Aether workflows)
   --dry-run                                    Preview changes without writing files
 
 Handoff options:
@@ -356,6 +360,29 @@ async function acceptWorkflowTask(
 async function runWorkflowCommand(args: string[]): Promise<number> {
   const [subcommand, resource, ...options] = args;
 
+  if (subcommand === "list") {
+    if (options.length > 0) {
+      throw new Error("workflow list accepts at most one optional directory path.");
+    }
+    const directory = resource ?? "workflows/aether";
+    const entries = await listWorkflowFiles(directory);
+    if (entries.length === 0) {
+      console.log("No workflow definitions found in " + resolve(directory) + ".");
+      return 0;
+    }
+
+    console.log("Workflows in " + resolve(directory) + ":");
+    for (const entry of entries) {
+      console.log(
+        "  " + entry.id.padEnd(28) +
+          "v" + entry.version + "  " + entry.name +
+          "  (" + entry.path + ")",
+      );
+    }
+    console.log(entries.length + " workflow(s) available.");
+    return 0;
+  }
+
   if (subcommand === "validate") {
     if (!resource) {
       console.error("Missing workflow file path.");
@@ -553,12 +580,14 @@ function parseInitArguments(args: string[]): {
   platforms: AdapterId[];
   mode: "greenfield" | "brownfield";
   skillsRoot?: string;
+  workflowsRoot?: string;
   dryRun: boolean;
 } {
   const platforms: AdapterId[] = [];
   let projectRoot = process.cwd();
   let mode: "greenfield" | "brownfield" = "brownfield";
   let skillsRoot: string | undefined;
+  let workflowsRoot: string | undefined;
   let dryRun = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -574,7 +603,8 @@ function parseInitArguments(args: string[]): {
       flag !== "--platform" &&
       flag !== "--mode" &&
       flag !== "--project" &&
-      flag !== "--skills"
+      flag !== "--skills" &&
+      flag !== "--workflows"
     ) {
       throw new Error('Unknown init option "' + flag + '".');
     }
@@ -596,6 +626,8 @@ function parseInitArguments(args: string[]): {
       projectRoot = resolve(value);
     } else if (flag === "--skills") {
       skillsRoot = resolve(value);
+    } else if (flag === "--workflows") {
+      workflowsRoot = resolve(value);
     }
   }
 
@@ -604,24 +636,30 @@ function parseInitArguments(args: string[]): {
     platforms: platforms.length > 0 ? [...new Set(platforms)] : ["generic"],
     mode,
     ...(skillsRoot === undefined ? {} : { skillsRoot }),
+    ...(workflowsRoot === undefined ? {} : { workflowsRoot }),
     dryRun,
   };
 }
 
 async function runInitCommand(args: string[]): Promise<number> {
   const options = parseInitArguments(args);
-  const skillsRoot = options.skillsRoot ?? await resolveBundledSkillsRoot();
+  const [skillsRoot, workflowsRoot] = await Promise.all([
+    options.skillsRoot ?? resolveBundledSkillsRoot(),
+    options.workflowsRoot ?? resolveBundledWorkflowsRoot(),
+  ]);
   const result = await initProject({
     ...options,
     skillsRoot,
+    workflowsRoot,
   });
 
   console.log("Initialized Aether project: " + result.projectRoot);
   console.log("Platforms: " + result.destinations.join(", "));
+  console.log("Workflow directory: workflows/aether");
   console.log("Project config: " + result.config);
   console.log("Managed-file manifest: " + result.manifest);
   console.log(
-    "Skills: " + result.installed.length + " installed, " +
+    "Managed files: " + result.installed.length + " installed, " +
       result.updated.length + " updated, " +
       result.unchanged.length + " unchanged.",
   );
@@ -665,6 +703,7 @@ async function runDoctorCommand(args: string[]): Promise<number> {
 async function runUpdateCommand(args: string[]): Promise<number> {
   let projectRoot = process.cwd();
   let skillsRoot: string | undefined;
+  let workflowsRoot: string | undefined;
   let dryRun = false;
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
@@ -672,19 +711,21 @@ async function runUpdateCommand(args: string[]): Promise<number> {
       dryRun = true;
       continue;
     }
-    if (flag !== "--project" && flag !== "--skills") {
+    if (flag !== "--project" && flag !== "--skills" && flag !== "--workflows") {
       throw new Error('Unknown update option "' + flag + '".');
     }
     const value = args[index + 1];
     if (!value || value.startsWith("--")) throw new Error("Missing value after " + flag + ".");
     if (flag === "--project") projectRoot = resolve(value);
-    else skillsRoot = resolve(value);
+    else if (flag === "--skills") skillsRoot = resolve(value);
+    else workflowsRoot = resolve(value);
     index += 1;
   }
 
   const result = await updateProject({
     projectRoot,
     ...(skillsRoot === undefined ? {} : { skillsRoot }),
+    ...(workflowsRoot === undefined ? {} : { workflowsRoot }),
     dryRun,
   });
   console.log("Updated Aether project: " + result.projectRoot);

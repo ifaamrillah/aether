@@ -1,0 +1,80 @@
+schema_version: 1
+id: bug-fix
+version: 1
+name: Bug Fix
+description: Diagnose, fix, and verify a reproducible defect.
+
+inputs:
+  - name: bug_description
+    type: string
+    required: true
+
+stages:
+  - id: diagnosis
+    skill: discovery
+    required: true
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+        - docs/**
+      write_paths:
+        - docs/diagnosis/**
+    acceptance_criteria:
+      - Identify the affected behavior and likely root cause.
+      - Record a reproducible scenario or explain why reproduction is not possible.
+
+  - id: implementation
+    skill: implementation
+    required: true
+    depends_on:
+      - diagnosis
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+        - docs/diagnosis/**
+      write_paths:
+        - src/**
+        - tests/**
+    acceptance_criteria:
+      - Implement the smallest safe correction.
+      - Add a regression test for the reported defect.
+
+  - id: verification
+    skill: testing
+    required: true
+    depends_on:
+      - implementation
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+      write_paths:
+        - docs/reports/**
+    acceptance_criteria:
+      - Run the relevant regression and test suites.
+      - Report commands, exit codes, and evidence.
+
+  - id: review
+    skill: code-review
+    required: true
+    depends_on:
+      - verification
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+        - docs/diagnosis/**
+      write_paths:
+        - docs/reports/**
+    acceptance_criteria:
+      - Review the patch for regressions and scope creep.
+      - Report unresolved risks.
+
+completion:
+  required_stages:
+    - diagnosis
+    - implementation
+    - verification
+    - review

@@ -24,6 +24,14 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: node apps/cli/dist/index.js workflow validate workflows/feature.yaml
+      - run: node apps/cli/dist/index.js workflow list workflows
+      - name: Validate bundled workflows
+        shell: bash
+        run: |
+          for workflow in workflows/*.yaml workflows/*.yml; do
+            test -f "$workflow" || continue
+            node apps/cli/dist/index.js workflow validate "$workflow"
+          done
       - run: node apps/cli/dist/index.js skill validate skills
       - run: node apps/cli/dist/index.js platform list
       - run: node apps/cli/dist/index.js platform detect --project .
@@ -31,14 +39,16 @@ jobs:
         shell: bash
         run: |
           project_dir="$(mktemp -d)"
-          node apps/cli/dist/index.js init --project "$project_dir" --skills "$GITHUB_WORKSPACE/skills" --platform codex --platform gemini-cli
+          node apps/cli/dist/index.js init --project "$project_dir" --skills "$GITHUB_WORKSPACE/skills" --workflows "$GITHUB_WORKSPACE/workflows" --platform codex --platform gemini-cli
           node apps/cli/dist/index.js doctor --project "$project_dir"
           test -f "$project_dir/.agents/skills/project-onboarding/SKILL.md"
+          test -f "$project_dir/workflows/aether/feature.yaml"
           test -f "$project_dir/.aether/managed-files.json"
-          node apps/cli/dist/index.js update --project "$project_dir" --skills "$GITHUB_WORKSPACE/skills"
+          node apps/cli/dist/index.js update --project "$project_dir" --skills "$GITHUB_WORKSPACE/skills" --workflows "$GITHUB_WORKSPACE/workflows"
           node apps/cli/dist/index.js uninstall --project "$project_dir"
           test -f "$project_dir/.aether/config.yaml"
           test ! -f "$project_dir/.agents/skills/project-onboarding/SKILL.md"
+          test ! -f "$project_dir/workflows/aether/feature.yaml"
 
       - name: Smoke test workflow lifecycle CLI
         shell: bash

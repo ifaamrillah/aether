@@ -17,6 +17,7 @@ import { validateAetherContract } from "@aether/schemas";
 import { createAgentAdapter } from "@aether/adapters";
 import type { AdapterId } from "@aether/adapters";
 import { validateSkills } from "./skill-validate.js";
+import { validateWorkflowContent } from "./workflow-validate.js";
 
 export type ProjectMode = "greenfield" | "brownfield";
 
@@ -25,6 +26,7 @@ export interface InitProjectOptions {
   platforms: AdapterId[];
   mode?: ProjectMode;
   skillsRoot?: string;
+  workflowsRoot?: string;
   dryRun?: boolean;
   clock?: () => Date;
 }
@@ -32,6 +34,7 @@ export interface InitProjectOptions {
 export interface InitProjectResult {
   projectRoot: string;
   skillsRoot: string;
+  workflowsRoot: string;
   destinations: string[];
   installed: string[];
   updated: string[];
@@ -265,13 +268,16 @@ async function atomicWrite(
   }
 }
 
-async function listRegularFiles(directory: string): Promise<string[]> {
+async function listRegularFiles(
+  directory: string,
+  bundleLabel = "bundle",
+): Promise<string[]> {
   const files: string[] = [];
   const walk = async (current: string): Promise<void> => {
     const entries = await readdir(current, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isSymbolicLink()) {
-        throw new Error("Skill bundles must not contain symbolic links: " + join(current, entry.name));
+        throw new Error(bundleLabel + " must not contain symbolic links: " + join(current, entry.name));
       }
       const child = join(current, entry.name);
       if (entry.isDirectory()) {
@@ -279,7 +285,7 @@ async function listRegularFiles(directory: string): Promise<string[]> {
       } else if (entry.isFile()) {
         files.push(child);
       } else {
-        throw new Error("Unsupported filesystem entry in skill bundle: " + child);
+        throw new Error("Unsupported filesystem entry in " + bundleLabel.toLowerCase() + ": " + child);
       }
     }
   };
@@ -311,7 +317,7 @@ async function resolveSkillBundle(
     if (!isWithinRoot(root, realDirectory)) {
       throw new Error("Skill directory resolves outside the bundle root: " + validation.path);
     }
-    const files = await listRegularFiles(realDirectory);
+    const files = await listRegularFiles(realDirectory, "Skill bundle");
     if (!files.some((file) => basename(file) === "SKILL.md")) {
       throw new Error("Skill folder is missing SKILL.md: " + validation.path);
     }
@@ -338,6 +344,70 @@ export async function resolveBundledSkillsRoot(): Promise<string> {
   }
 }
 
+export async function resolveBundledWorkflowsRoot(): Promise<string> {
+  const environmentPath = process.env.AETHER_WORKFLOWS_DIR;
+  if (environmentPath) return realpath(resolve(environmentPath));
+
+  const bundledPath = fileURLToPath(new URL("../../../../workflows/", import.meta.url));
+  try {
+    return await realpath(bundledPath);
+  } catch {
+    throw new Error(
+      "Aether workflow bundle was not found. Set AETHER_WORKFLOWS_DIR or pass --workflows <path>.",
+    );
+  }
+}
+
+interface BundledWorkflowFile {
+  relativePath: string;
+  source: string;
+  bytes: Buffer;
+}
+
+async function resolveWorkflowBundle(
+  workflowsRoot: string,
+): Promise<BundledWorkflowFile[]> {
+  const root = await realpath(resolve(workflowsRoot));
+  const allFiles = await listRegularFiles(root, "Workflow bundle");
+  const candidates = allFiles.filter((path) => /[.]ya?ml$/i.test(path));
+  if (candidates.length === 0) {
+    throw new Error("Workflow bundle contains no .yaml or .yml files.");
+  }
+
+  const identifiers = new Set<string>();
+  const bundle: BundledWorkflowFile[] = [];
+  for (const sourcePath of candidates) {
+    const realSource = await realpath(sourcePath);
+    if (!isWithinRoot(root, realSource)) {
+      throw new Error("Workflow file resolves outside the bundle root: " + sourcePath);
+    }
+    const relativePath = relative(root, realSource).split(sep).join("/");
+    if (!safeRelativePath(relativePath)) {
+      throw new Error("Unsafe workflow path in bundle: " + relativePath);
+    }
+
+    const bytes = await readFile(realSource);
+    const validation = validateWorkflowContent(bytes.toString("utf8"));
+    if (!validation.ok) {
+      throw new Error(
+        "Invalid bundled workflow " + relativePath + ": " +
+          validation.errors.join("; "),
+      );
+    }
+    if (identifiers.has(validation.workflowId)) {
+      throw new Error("Duplicate workflow ID in bundle: " + validation.workflowId);
+    }
+    identifiers.add(validation.workflowId);
+    bundle.push({
+      relativePath,
+      source: relative(root, realSource).split(sep).join("/"),
+      bytes,
+    });
+  }
+  return bundle.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+}
+
+
 export async function initProject(
   options: InitProjectOptions,
 ): Promise<InitProjectResult> {
@@ -347,7 +417,9 @@ export async function initProject(
 
   const mode = options.mode ?? "brownfield";
   const skillsRoot = await realpath(resolve(options.skillsRoot ?? await resolveBundledSkillsRoot()));
+  const workflowsRoot = await realpath(resolve(options.workflowsRoot ?? await resolveBundledWorkflowsRoot()));
   const skillBundle = await resolveSkillBundle(skillsRoot);
+  const workflowBundle = await resolveWorkflowBundle(workflowsRoot);
   const destinations = [...new Set(
     platforms.map((platform) => createAgentAdapter(platform).descriptor.skill_install_path),
   )];
@@ -355,6 +427,7 @@ export async function initProject(
   const result: InitProjectResult = {
     projectRoot,
     skillsRoot,
+    workflowsRoot,
     destinations,
     installed: [],
     updated: [],
@@ -486,6 +559,70 @@ export async function initProject(
 
       plannedWrites.push(...candidates);
     }
+  }
+
+  // Install workflow definitions under a namespace so user-owned root workflows remain untouched.
+  for (const workflow of workflowBundle) {
+    const destinationRelative = "workflows/aether/" + workflow.relativePath;
+    if (!safeRelativePath(destinationRelative)) {
+      throw new Error("Unsafe workflow destination: " + destinationRelative);
+    }
+
+    const sourceHash = sha256(workflow.bytes);
+    const managedRecord = managedByPath.get(destinationRelative);
+    const destinationAbsolute = resolve(projectRoot, ...destinationRelative.split("/"));
+    const destinationEntry = await lstat(destinationAbsolute).catch(() => undefined);
+
+    if (!destinationEntry) {
+      plannedWrites.push({
+        path: destinationRelative,
+        bytes: workflow.bytes,
+        source: "workflows/" + workflow.source,
+        action: "installed",
+      });
+      continue;
+    }
+
+    if (!destinationEntry.isFile()) {
+      result.conflicts.push({
+        path: destinationRelative,
+        reason: "Existing destination is not a regular file; it was not changed.",
+      });
+      continue;
+    }
+
+    if (!managedRecord) {
+      result.conflicts.push({
+        path: destinationRelative,
+        reason: "File already exists and is not recorded as Aether-managed; it was preserved.",
+      });
+      continue;
+    }
+
+    const realDestination = await realpath(destinationAbsolute);
+    if (!isWithinRoot(projectRoot, realDestination)) {
+      result.conflicts.push({
+        path: destinationRelative,
+        reason: "Existing destination resolves outside the project; it was preserved.",
+      });
+      continue;
+    }
+
+    const existingHash = sha256(await readFile(realDestination));
+    if (existingHash !== managedRecord.sha256) {
+      result.conflicts.push({
+        path: destinationRelative,
+        reason: "Aether-managed workflow was modified by a user; it was preserved.",
+      });
+      continue;
+    }
+
+    plannedWrites.push({
+      path: destinationRelative,
+      bytes: workflow.bytes,
+      source: "workflows/" + workflow.source,
+      action: existingHash === sourceHash ? "unchanged" : "updated",
+    });
   }
 
   if (options.dryRun) {
@@ -663,6 +800,7 @@ export async function doctorProject(projectRoot: string): Promise<DoctorResult> 
 export async function updateProject(options: {
   projectRoot: string;
   skillsRoot?: string;
+  workflowsRoot?: string;
   dryRun?: boolean;
   clock?: () => Date;
 }): Promise<InitProjectResult> {
@@ -715,6 +853,7 @@ export async function updateProject(options: {
   return initProject({
     projectRoot: root,
     ...(options.skillsRoot === undefined ? {} : { skillsRoot: options.skillsRoot }),
+    ...(options.workflowsRoot === undefined ? {} : { workflowsRoot: options.workflowsRoot }),
     platforms,
     mode: config.project.mode,
     ...(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),

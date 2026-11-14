@@ -1,0 +1,96 @@
+schema_version: 1
+id: refactoring
+version: 1
+name: Refactoring
+description: Improve internal structure while preserving externally observable behavior.
+
+inputs:
+  - name: refactor_goal
+    type: string
+    required: true
+
+stages:
+  - id: discovery
+    skill: discovery
+    required: true
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+        - docs/**
+      write_paths:
+        - docs/discovery/**
+    acceptance_criteria:
+      - Map relevant modules, dependencies, and current behavior.
+      - Identify compatibility constraints.
+
+  - id: planning
+    skill: implementation-planning
+    required: true
+    depends_on:
+      - discovery
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+        - docs/discovery/**
+      write_paths:
+        - docs/plans/**
+    acceptance_criteria:
+      - Define incremental refactoring steps.
+      - Identify behavior-preservation tests and rollback boundaries.
+
+  - id: implementation
+    skill: implementation
+    required: true
+    depends_on:
+      - planning
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+        - docs/plans/**
+      write_paths:
+        - src/**
+        - tests/**
+    acceptance_criteria:
+      - Preserve public behavior and contracts.
+      - Keep changes incremental and covered by tests.
+
+  - id: verification
+    skill: testing
+    required: true
+    depends_on:
+      - implementation
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+      write_paths:
+        - docs/reports/**
+    acceptance_criteria:
+      - Run unit and integration tests relevant to changed modules.
+      - Report before/after behavior and verification evidence.
+
+  - id: review
+    skill: code-review
+    required: true
+    depends_on:
+      - verification
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+      write_paths:
+        - docs/reports/**
+    acceptance_criteria:
+      - Check for accidental behavior changes and unnecessary abstractions.
+      - Report remaining technical debt.
+
+completion:
+  required_stages:
+    - discovery
+    - planning
+    - implementation
+    - verification
+    - review

@@ -1,0 +1,63 @@
+schema_version: 1
+id: documentation-update
+version: 1
+name: Documentation Update
+description: Update project documentation against verified implementation behavior.
+
+inputs:
+  - name: documentation_goal
+    type: string
+    required: true
+
+stages:
+  - id: discovery
+    skill: discovery
+    required: true
+    scope:
+      read_paths:
+        - src/**
+        - docs/**
+        - README.md
+      write_paths:
+        - docs/discovery/**
+    acceptance_criteria:
+      - Identify the source files and existing docs relevant to the requested change.
+      - Record discrepancies and source references.
+
+  - id: documentation
+    skill: documentation
+    required: true
+    depends_on:
+      - discovery
+    scope:
+      read_paths:
+        - src/**
+        - docs/discovery/**
+      write_paths:
+        - README.md
+        - docs/**
+    acceptance_criteria:
+      - Update only statements supported by implementation or explicit decisions.
+      - Preserve approved requirements and identify unresolved drift.
+
+  - id: review
+    skill: code-review
+    required: true
+    depends_on:
+      - documentation
+    scope:
+      read_paths:
+        - README.md
+        - docs/**
+        - src/**
+      write_paths:
+        - docs/reports/**
+    acceptance_criteria:
+      - Check documentation links, commands, and code references.
+      - Report unsupported or ambiguous claims.
+
+completion:
+  required_stages:
+    - discovery
+    - documentation
+    - review

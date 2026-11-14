@@ -12,6 +12,7 @@ import {
 
 let projectRoot: string;
 let skillsRoot: string;
+let workflowsRoot: string;
 let currentTime: number;
 
 async function createSkill(
@@ -30,10 +31,39 @@ async function createSkill(
   await writeFile(join(directory, "scripts", "helper.js"), contents, "utf8");
 }
 
+const basicWorkflow = `schema_version: 1
+id: feature-development
+version: 1
+name: Feature Development
+description: A small test workflow for project initialization.
+inputs: []
+stages:
+  - id: implementation
+    skill: implementation
+    required: true
+    scope:
+      read_paths:
+        - src/**
+      write_paths:
+        - src/**
+    acceptance_criteria:
+      - Implement the requested feature.
+completion:
+  required_stages:
+    - implementation
+`;
+
+async function createWorkflow(fileName = "feature.yaml", contents = basicWorkflow): Promise<void> {
+  const path = join(workflowsRoot, fileName);
+  await mkdir(join(path, ".."), { recursive: true });
+  await writeFile(path, contents, "utf8");
+}
+
 function options(platforms: InitProjectOptions["platforms"] = ["generic"]): InitProjectOptions {
   return {
     projectRoot,
     skillsRoot,
+    workflowsRoot,
     platforms,
     clock: () => new Date(currentTime),
   };
@@ -42,13 +72,16 @@ function options(platforms: InitProjectOptions["platforms"] = ["generic"]): Init
 beforeEach(async () => {
   projectRoot = await mkdtemp(join(tmpdir(), "aether-project-init-"));
   skillsRoot = await mkdtemp(join(tmpdir(), "aether-skill-source-"));
+  workflowsRoot = await mkdtemp(join(tmpdir(), "aether-workflow-source-"));
   currentTime = Date.parse("2026-11-15T02:00:00.000Z");
   await createSkill("engineering", "implementation");
+  await createWorkflow();
 });
 
 afterEach(async () => {
   await rm(projectRoot, { recursive: true, force: true });
   await rm(skillsRoot, { recursive: true, force: true });
+  await rm(workflowsRoot, { recursive: true, force: true });
 });
 
 describe("project initialization", () => {
@@ -65,6 +98,44 @@ describe("project initialization", () => {
     expect(installed).toContain("name: implementation");
     expect(await readFile(join(projectRoot, ".aether", "config.yaml"), "utf8"))
       .toContain("autonomy: balanced");
+  });
+
+  it("installs validated workflow definitions under workflows/aether", async () => {
+    const result = await initProject(options());
+    expect(result.installed).toContain("workflows/aether/feature.yaml");
+    const installed = await readFile(
+      join(projectRoot, "workflows", "aether", "feature.yaml"),
+      "utf8",
+    );
+    expect(installed).toContain("id: feature-development");
+  });
+
+  it("preserves existing user-owned workflow files", async () => {
+    const directory = join(projectRoot, "workflows", "aether");
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "feature.yaml"), "user workflow", "utf8");
+
+    const result = await initProject(options());
+    expect(result.conflicts.some((item) => item.path === "workflows/aether/feature.yaml")).toBe(true);
+    expect(await readFile(join(directory, "feature.yaml"), "utf8")).toBe("user workflow");
+  });
+
+  it("rejects an invalid workflow bundle before installing it", async () => {
+    await writeFile(join(workflowsRoot, "feature.yaml"), "not: [valid", "utf8");
+    await expect(initProject(options())).rejects.toThrow(/Invalid bundled workflow/);
+    await expect(readFile(join(projectRoot, ".agents", "skills", "implementation", "SKILL.md"), "utf8"))
+      .rejects.toThrow();
+  });
+
+  it("updates unchanged managed workflow definitions", async () => {
+    await initProject(options());
+    const updated = basicWorkflow.replace("Feature Development", "Feature Development Updated");
+    await writeFile(join(workflowsRoot, "feature.yaml"), updated, "utf8");
+
+    const result = await updateProject({ projectRoot, skillsRoot, workflowsRoot });
+    expect(result.updated).toContain("workflows/aether/feature.yaml");
+    expect(await readFile(join(projectRoot, "workflows", "aether", "feature.yaml"), "utf8"))
+      .toContain("Feature Development Updated");
   });
 
   it("deduplicates platforms that share a skill destination", async () => {
@@ -113,7 +184,7 @@ describe("project initialization", () => {
       "utf8",
     );
 
-    const result = await updateProject({ projectRoot, skillsRoot });
+    const result = await updateProject({ projectRoot, skillsRoot, workflowsRoot });
     expect(result.updated).toContain(".agents/skills/implementation/scripts/helper.js");
     expect(
       await readFile(
@@ -130,8 +201,11 @@ describe("project initialization", () => {
 
     const result = await uninstallProject(projectRoot);
     expect(result.removed).toContain(".agents/skills/implementation/scripts/helper.js");
+    expect(result.removed).toContain("workflows/aether/feature.yaml");
     expect(result.preserved.some((item) => item.path.endsWith("/SKILL.md"))).toBe(true);
     expect(await readFile(skillFile, "utf8")).toBe("user-edited skill");
+    await expect(readFile(join(projectRoot, "workflows", "aether", "feature.yaml"), "utf8"))
+      .rejects.toThrow();
     await expect(readFile(join(projectRoot, ".aether", "config.yaml"), "utf8"))
       .resolves.toContain("autonomy: balanced");
   });

@@ -44,7 +44,7 @@ aether init --platform codex --platform claude-code
 aether doctor
 ```
 
-The installer writes a validated `.aether/config.yaml` and a checksummed `.aether/managed-files.json`. It never overwrites untracked skills or Aether-managed files that have been edited by a user. Use `--dry-run` to preview changes.
+The installer writes a validated `.aether/config.yaml`, portable skills under the selected platform's discovery directory, and validated workflow definitions under `workflows/aether/`. A checksummed `.aether/managed-files.json` tracks both. It never overwrites untracked skills/workflows or Aether-managed files that have been edited by a user. Use `--dry-run` to preview changes.
 
 Update and uninstall are conservative:
 
@@ -58,7 +58,8 @@ Update refreshes unchanged Aether-managed files using the platforms recorded in 
 Start a local workflow run:
 
 ```bash
-node apps/cli/dist/index.js workflow run workflows/feature.yaml \
+node apps/cli/dist/index.js workflow list
+node apps/cli/dist/index.js workflow run workflows/aether/feature.yaml \
   --input 'feature_description=Add account settings'
 ```
 
@@ -67,7 +68,7 @@ The CLI persists run state under `.aether/runs/`. It also prepares portable task
 Prepare handoffs for a run:
 
 ```bash
-node apps/cli/dist/index.js workflow handoff <run-id> --file workflows/feature.yaml --adapter claude-code
+node apps/cli/dist/index.js workflow handoff <run-id> --file workflows/aether/feature.yaml --adapter claude-code
 ```
 
 Each ready stage receives a task contract and `HANDOFF.md` under `.aether/handoffs/<run-id>/<stage-id>/`. Select `generic`, `claude-code`, `codex`, `opencode`, `gemini-cli`, or `antigravity`. These adapters prepare human-mediated handoffs; they do not launch platform agents.
@@ -76,7 +77,7 @@ After the agent has worked, create the task result JSON at the path specified by
 
 ```bash
 node apps/cli/dist/index.js workflow accept <run-id> \
-  --file workflows/feature.yaml \
+  --file workflows/aether/feature.yaml \
   --stage discovery \
   --result .aether/handoffs/<run-id>/discovery/result.json
 ```
@@ -85,7 +86,7 @@ Aether checks task identity, write-scope compliance, evidence file existence, pr
 
 Hashes prove file integrity, not the truth of an agent's report or that a test command really ran. The current adapter does not independently execute tests.
 
-Use the run ID with `workflow status`, `workflow pause`, `workflow resume --file <workflow-file>`, `workflow recover --file <workflow-file>`, or `workflow cancel`.
+Use the run ID with `workflow status`, `workflow pause`, `workflow resume --file <workflow-file>`, `workflow recover --file <workflow-file>`, or `workflow cancel`. The workflow file remains in `workflows/aether/` and is updated conservatively by `aether update`.
 
 The current adapters produce portable instructions and collect results. They do not yet execute native subagents, enforce OS-level file permissions, or independently rerun every test command.
 

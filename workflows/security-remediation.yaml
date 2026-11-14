@@ -1,0 +1,95 @@
+schema_version: 1
+id: security-remediation
+version: 1
+name: Security Remediation
+description: Triage security findings, implement a scoped fix, and verify the remediation.
+
+inputs:
+  - name: finding_description
+    type: string
+    required: true
+
+stages:
+  - id: assessment
+    skill: security-audit
+    required: true
+    scope:
+      read_paths:
+        - src/**
+        - package.json
+        - pnpm-lock.yaml
+        - docs/**
+      write_paths:
+        - docs/security/**
+    acceptance_criteria:
+      - Describe the finding, affected assets, and plausible impact.
+      - Record reproduction or validation evidence where safe.
+
+  - id: remediation-plan
+    skill: implementation-planning
+    required: true
+    depends_on:
+      - assessment
+    scope:
+      read_paths:
+        - src/**
+        - docs/security/**
+      write_paths:
+        - docs/plans/**
+    acceptance_criteria:
+      - Propose a bounded remediation and regression strategy.
+      - Identify changes requiring human approval.
+
+  - id: implementation
+    skill: implementation
+    required: true
+    depends_on:
+      - remediation-plan
+    scope:
+      read_paths:
+        - src/**
+        - docs/plans/**
+      write_paths:
+        - src/**
+        - tests/**
+    acceptance_criteria:
+      - Implement the approved remediation only.
+      - Avoid deploying or changing credentials/permissions.
+
+  - id: verification
+    skill: testing
+    required: true
+    depends_on:
+      - implementation
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+      write_paths:
+        - docs/security/**
+    acceptance_criteria:
+      - Run regression checks and relevant security tests.
+      - Record the evidence and any residual risk.
+
+  - id: review
+    skill: code-review
+    required: true
+    depends_on:
+      - verification
+    scope:
+      read_paths:
+        - src/**
+        - tests/**
+      write_paths:
+        - docs/security/**
+    acceptance_criteria:
+      - Independently inspect the patch for incomplete mitigation.
+      - Confirm no unrelated changes were introduced.
+
+completion:
+  required_stages:
+    - assessment
+    - remediation-plan
+    - implementation
+    - verification
+    - review

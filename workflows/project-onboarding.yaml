@@ -1,0 +1,76 @@
+schema_version: 1
+id: project-onboarding
+version: 1
+name: Project Onboarding
+description: Build a grounded understanding of a new or existing project and establish its initial engineering knowledge.
+
+inputs:
+  - name: project_goal
+    type: string
+    required: true
+
+stages:
+  - id: project-assessment
+    skill: project-onboarding
+    required: true
+    scope:
+      read_paths:
+        - README.md
+        - package.json
+        - pnpm-workspace.yaml
+        - src/**
+        - apps/**
+        - packages/**
+        - docs/**
+      write_paths:
+        - docs/aether/project/**
+    acceptance_criteria:
+      - Determine whether the project is greenfield, brownfield, or a partially initialized codebase.
+      - Summarize repository structure, languages, frameworks, build commands, and test commands.
+      - Identify project constraints and known risks without guessing.
+
+  - id: technical-discovery
+    skill: discovery
+    required: true
+    depends_on:
+      - project-assessment
+    scope:
+      read_paths:
+        - README.md
+        - package.json
+        - src/**
+        - apps/**
+        - packages/**
+        - docs/aether/project/**
+      write_paths:
+        - docs/aether/discovery/**
+    acceptance_criteria:
+      - Map important modules and dependencies relevant to the stated project goal.
+      - Identify existing conventions and likely change boundaries.
+      - Reference source paths for material findings.
+
+  - id: knowledge-baseline
+    skill: documentation
+    required: true
+    depends_on:
+      - technical-discovery
+    scope:
+      read_paths:
+        - docs/aether/project/**
+        - docs/aether/discovery/**
+        - src/**
+        - apps/**
+        - packages/**
+      write_paths:
+        - docs/aether/project/**
+        - docs/aether/architecture/**
+    acceptance_criteria:
+      - Produce a concise project baseline grounded in repository evidence.
+      - Record unresolved questions rather than inventing decisions.
+      - Keep generated documents focused and incremental.
+
+completion:
+  required_stages:
+    - project-assessment
+    - technical-discovery
+    - knowledge-baseline
