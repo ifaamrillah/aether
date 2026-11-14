@@ -1,21 +1,47 @@
 {
   "name": "@aether/schemas",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
+  "description": "Canonical JSON Schemas and runtime validators for Aether",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
+  "files": [
+    "dist/**",
+    "json-schema/**",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "pnpm build"
   },
   "dependencies": {
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1"
+  },
+  "sideEffects": false,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ifaamrillah/aether.git"
+  },
+  "homepage": "https://github.com/ifaamrillah/aether#readme",
+  "bugs": {
+    "url": "https://github.com/ifaamrillah/aether/issues"
   }
 }

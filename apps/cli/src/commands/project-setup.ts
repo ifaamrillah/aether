@@ -334,7 +334,7 @@ export async function resolveBundledSkillsRoot(): Promise<string> {
   const environmentPath = process.env.AETHER_SKILLS_DIR;
   if (environmentPath) return realpath(resolve(environmentPath));
 
-  const bundledPath = fileURLToPath(new URL("../../../../skills/", import.meta.url));
+  const bundledPath = fileURLToPath(new URL("../bundles/skills/", import.meta.url));
   try {
     return await realpath(bundledPath);
   } catch {
@@ -348,7 +348,7 @@ export async function resolveBundledWorkflowsRoot(): Promise<string> {
   const environmentPath = process.env.AETHER_WORKFLOWS_DIR;
   if (environmentPath) return realpath(resolve(environmentPath));
 
-  const bundledPath = fileURLToPath(new URL("../../../../workflows/", import.meta.url));
+  const bundledPath = fileURLToPath(new URL("../bundles/workflows/", import.meta.url));
   try {
     return await realpath(bundledPath);
   } catch {

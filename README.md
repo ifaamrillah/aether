@@ -21,6 +21,19 @@ Aether is a modular harness, not a replacement agent runtime. It combines portab
 
 Aether is in its foundation and early implementation phase. Planned capabilities are not considered implemented until present and tested.
 
+## Install
+
+After the first public npm release, install the CLI globally:
+
+```bash
+npm install --global @aether/cli
+aether init --platform codex --platform claude-code
+aether doctor
+aether workflow list
+```
+
+The CLI package includes the maintained skills and workflow bundles. The repository is preparing its first npm release; package publication requires the project maintainer's npm scope and token.
+
 ## Development
 
 Requirements: Node.js 22+ and pnpm 10+.

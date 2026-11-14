@@ -23,6 +23,30 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - name: Verify publishable workspace tarballs
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.artifacts"
+          pnpm --filter @aether/core pack --pack-destination "$GITHUB_WORKSPACE/.artifacts"
+          pnpm --filter @aether/schemas pack --pack-destination "$GITHUB_WORKSPACE/.artifacts"
+          pnpm --filter @aether/adapters pack --pack-destination "$GITHUB_WORKSPACE/.artifacts"
+          pnpm --filter @aether/cli pack --pack-destination "$GITHUB_WORKSPACE/.artifacts"
+          tar -tzf "$GITHUB_WORKSPACE/.artifacts/aether-cli-0.1.0.tgz" | grep -q 'package/dist/bundles/skills/project/project-onboarding/SKILL.md'
+          tar -tzf "$GITHUB_WORKSPACE/.artifacts/aether-cli-0.1.0.tgz" | grep -q 'package/dist/bundles/workflows/feature.yaml'
+          tar -xOf "$GITHUB_WORKSPACE/.artifacts/aether-cli-0.1.0.tgz" package/package.json | grep -q '"@aether/core": "0.1.0"'
+          consumer_dir="$(mktemp -d)"
+          cd "$consumer_dir"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund \
+            "$GITHUB_WORKSPACE/.artifacts/aether-core-0.1.0.tgz" \
+            "$GITHUB_WORKSPACE/.artifacts/aether-schemas-0.1.0.tgz" \
+            "$GITHUB_WORKSPACE/.artifacts/aether-adapters-0.1.0.tgz" \
+            "$GITHUB_WORKSPACE/.artifacts/aether-cli-0.1.0.tgz"
+          npx --no-install aether --version
+          npx --no-install aether init --platform generic
+          test -f ".agents/skills/project-onboarding/SKILL.md"
+          test -f "workflows/aether/feature.yaml"
+          npx --no-install aether workflow list
       - run: node apps/cli/dist/index.js workflow validate workflows/feature.yaml
       - run: node apps/cli/dist/index.js workflow list workflows
       - name: Validate bundled workflows

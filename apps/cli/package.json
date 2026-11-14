@@ -1,20 +1,41 @@
 {
   "name": "@aether/cli",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
+  "description": "CLI for the Aether AI Engineering Harness",
   "bin": {
     "aether": "./dist/index.js"
   },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-bundles.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "pnpm build"
   },
   "dependencies": {
     "@aether/core": "workspace:*",
     "@aether/schemas": "workspace:*",
-    "yaml": "^2.7.0",
-    "@aether/adapters": "workspace:*"
+    "@aether/adapters": "workspace:*",
+    "yaml": "^2.7.0"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ifaamrillah/aether.git"
+  },
+  "homepage": "https://github.com/ifaamrillah/aether#readme",
+  "bugs": {
+    "url": "https://github.com/ifaamrillah/aether/issues"
   }
 }
