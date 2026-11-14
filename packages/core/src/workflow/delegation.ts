@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { realpath, stat } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { WorkflowRunSnapshot } from "../state/types.js";
 import type { WorkflowDefinition, WorkflowStageDefinition } from "./types.js";
@@ -61,13 +61,19 @@ export interface VerifiedTaskEvidence {
   size_bytes: number;
 }
 
+export interface VerifiedChangedFile {
+  path: string;
+  sha256: string;
+  size_bytes: number;
+}
+
 export interface VerifiedTaskResult {
   schema_version: 1;
   task_id: string;
   run_id: string;
   stage_id: string;
   summary: string;
-  changed_files: string[];
+  changed_files: VerifiedChangedFile[];
   evidence: VerifiedTaskEvidence[];
   verified_at: string;
 }
@@ -181,6 +187,54 @@ function matchesWriteScope(path: string, patterns: string[]): boolean {
   });
 }
 
+async function resolveSafeRegularFile(
+  root: string,
+  path: string,
+  label: string,
+): Promise<{ realPath: string; sizeBytes: number }> {
+  const segments = path.split("/");
+  let current = root;
+
+  for (const [index, segment] of segments.entries()) {
+    current = resolve(current, segment);
+    const details = await lstat(current).catch(() => {
+      throw new TaskResultValidationError([label + " does not exist: " + path]);
+    });
+    if (details.isSymbolicLink()) {
+      throw new TaskResultValidationError([
+        label + " must not traverse symbolic links: " + path,
+      ]);
+    }
+    const isLast = index === segments.length - 1;
+    if (!isLast && !details.isDirectory()) {
+      throw new TaskResultValidationError([
+        label + " contains a non-directory path component: " + path,
+      ]);
+    }
+    if (isLast && !details.isFile()) {
+      throw new TaskResultValidationError([
+        label + " must be a regular file: " + path,
+      ]);
+    }
+  }
+
+  const realPath = await realpath(current).catch(() => {
+    throw new TaskResultValidationError([label + " does not resolve: " + path]);
+  });
+  if (!isWithinRoot(root, realPath)) {
+    throw new TaskResultValidationError([
+      label + " resolves outside the project root: " + path,
+    ]);
+  }
+  const details = await lstat(realPath);
+  if (details.isSymbolicLink() || !details.isFile()) {
+    throw new TaskResultValidationError([
+      label + " is not a regular file: " + path,
+    ]);
+  }
+  return { realPath, sizeBytes: details.size };
+}
+
 /**
  * Validates a submitted task result against the handoff contract and the real
  * project filesystem. Evidence is checksummed only after symlink-safe path
@@ -208,7 +262,7 @@ export async function verifyTaskResult(
 
   const root = await realpath(resolve(projectRoot));
   const seenChanged = new Set<string>();
-  const verifiedChanged: string[] = [];
+  const verifiedChanged: VerifiedChangedFile[] = [];
 
   for (const rawPath of submission.changed_files) {
     const path = validateRelativePath(rawPath, "Changed file path");
@@ -221,18 +275,13 @@ export async function verifyTaskResult(
         'Changed file "' + path + '" is outside the task write scope.',
       ]);
     }
-    const absolute = resolve(root, ...path.split("/"));
-    const real = await realpath(absolute).catch(() => {
-      throw new TaskResultValidationError(["Changed file does not exist: " + path]);
+    const resolved = await resolveSafeRegularFile(root, path, "Changed file");
+    const bytes = await readFile(resolved.realPath);
+    verifiedChanged.push({
+      path,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      size_bytes: bytes.length,
     });
-    if (!isWithinRoot(root, real)) {
-      throw new TaskResultValidationError(["Changed file resolves outside the project root: " + path]);
-    }
-    const details = await stat(real);
-    if (!details.isFile()) {
-      throw new TaskResultValidationError(["Changed path is not a regular file: " + path]);
-    }
-    verifiedChanged.push(path);
   }
 
   const validTypes: TaskEvidenceType[] = [
@@ -261,25 +310,17 @@ export async function verifyTaskResult(
     if (item.result === "failed") {
       throw new TaskResultValidationError(["Evidence reports failure: " + path]);
     }
-    const absolute = resolve(root, ...path.split("/"));
-    const real = await realpath(absolute).catch(() => {
-      throw new TaskResultValidationError(["Evidence file does not exist: " + path]);
-    });
-    if (!isWithinRoot(root, real)) {
-      throw new TaskResultValidationError(["Evidence path resolves outside the project root: " + path]);
-    }
-    const details = await stat(real);
-    if (!details.isFile() || details.size === 0) {
+    const resolved = await resolveSafeRegularFile(root, path, "Evidence file");
+    if (resolved.sizeBytes === 0) {
       throw new TaskResultValidationError(["Evidence must be a non-empty regular file: " + path]);
     }
-    const { readFile } = await import("node:fs/promises");
-    const bytes = await readFile(real);
+    const bytes = await readFile(resolved.realPath);
     const evidence: VerifiedTaskEvidence = {
       path,
       type: item.type,
       result: item.result,
       sha256: createHash("sha256").update(bytes).digest("hex"),
-      size_bytes: details.size,
+      size_bytes: bytes.length,
     };
     if (item.summary !== undefined) evidence.summary = item.summary;
     verifiedEvidence.push(evidence);

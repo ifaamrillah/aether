@@ -109,6 +109,18 @@ describe("stage delegation contracts", () => {
       }],
     }, root, () => new Date("2026-11-15T01:00:00.000Z"));
 
+    expect(result.changed_files).toEqual([
+      {
+        path: "src/feature.ts",
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        size_bytes: Buffer.byteLength("export const feature = true;\n"),
+      },
+      {
+        path: "tests/feature.test.ts",
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        size_bytes: Buffer.byteLength("test('feature', () => {});\n"),
+      },
+    ]);
     expect(result.evidence[0]?.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(result.evidence[0]?.size_bytes).toBeGreaterThan(0);
   });
@@ -124,6 +136,46 @@ describe("stage delegation contracts", () => {
       changed_files: ["README.md"],
       evidence: [{ path: ".aether/handoffs/run_test/implementation/output/test-report.txt", type: "test_report", result: "passed" }],
     }, root)).rejects.toBeInstanceOf(TaskResultValidationError);
+  });
+
+  it("rejects symbolic links for changed files and evidence, even when the target is inside the project", async () => {
+    const task = planReadyStageTasks(snapshot, workflow, "generic")[0]!;
+    const { symlink } = await import("node:fs/promises");
+    await symlink(
+      join(root, "src", "feature.ts"),
+      join(root, "src", "linked-feature.ts"),
+    );
+    await expect(verifyTaskResult(task, {
+      schema_version: 1,
+      task_id: task.task_id,
+      run_id: task.run_id,
+      stage_id: task.stage_id,
+      summary: "Symlinked changed path.",
+      changed_files: ["src/linked-feature.ts"],
+      evidence: [{
+        path: ".aether/handoffs/run_test/implementation/output/test-report.txt",
+        type: "test_report",
+        result: "passed",
+      }],
+    }, root)).rejects.toThrow(/symbolic links/);
+
+    await symlink(
+      join(root, ".aether", "handoffs", "run_test", "implementation", "output", "test-report.txt"),
+      join(root, ".aether", "handoffs", "run_test", "implementation", "output", "linked-report.txt"),
+    );
+    await expect(verifyTaskResult(task, {
+      schema_version: 1,
+      task_id: task.task_id,
+      run_id: task.run_id,
+      stage_id: task.stage_id,
+      summary: "Symlinked evidence path.",
+      changed_files: [],
+      evidence: [{
+        path: ".aether/handoffs/run_test/implementation/output/linked-report.txt",
+        type: "test_report",
+        result: "passed",
+      }],
+    }, root)).rejects.toThrow(/symbolic links/);
   });
 
   it("rejects path traversal and missing evidence", async () => {

@@ -37,6 +37,10 @@ A generated handoff is an instruction contract, not a sandbox. Actual filesystem
 6. `aether workflow accept` validates task identity, write scope, evidence paths, and checksums.
 7. WorkflowRunService accepts a stage completion only when the persisted verification manifest and evidence files still match their SHA-256 digests.
 
+## Evidence trust boundary
+
+A submitted evidence record with `result: passed` is still an agent/operator assertion. Aether verifies that the referenced file exists, remains inside the declared output scope, is a regular non-symlink file, and still matches its SHA-256 digest. It does **not** execute the claimed test command or independently prove that a test suite passed. Stronger proof requires a trusted test-runner/CI integration that captures the actual command, exit code, tool version, and output as evidence.
+
 ## Extension guidance
 
 An adapter must:

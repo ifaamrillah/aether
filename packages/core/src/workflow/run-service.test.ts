@@ -28,7 +28,12 @@ const workflow: WorkflowDefinition = {
     { name: "include_docs", type: "boolean", required: false, default: true },
   ],
   stages: [
-    { id: "discovery", skill: "discovery", required: true },
+    {
+      id: "discovery",
+      skill: "discovery",
+      required: true,
+      scope: { read_paths: ["src/**"], write_paths: ["src/**"] },
+    },
     {
       id: "implementation",
       skill: "implementation",
@@ -42,7 +47,11 @@ const workflow: WorkflowDefinition = {
   },
 };
 
-async function createVerification(runId: string, stageId: string) {
+async function createVerification(
+  runId: string,
+  stageId: string,
+  changedFiles: string[] = [],
+) {
   const outputPath =
     ".aether/handoffs/" + runId + "/" + stageId + "/output/test-report.txt";
   const manifestPath =
@@ -55,7 +64,14 @@ async function createVerification(runId: string, stageId: string) {
     run_id: runId,
     stage_id: stageId,
     summary: "Verified test evidence for " + stageId,
-    changed_files: [],
+    changed_files: changedFiles.map((path) => {
+      const bytes = Buffer.from("Changed file content for " + path + "\n", "utf8");
+      return {
+        path,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        size_bytes: bytes.length,
+      };
+    }),
     evidence: [{
       path: outputPath,
       type: "test_report",
@@ -66,11 +82,19 @@ async function createVerification(runId: string, stageId: string) {
     }],
     verified_at: "2026-11-15T01:00:00.000Z",
   };
-  const manifestContent = JSON.stringify(result, null, 2) + "\n";
   await mkdir(join(projectRoot, ".aether", "handoffs", runId, stageId, "output"), { recursive: true });
   await mkdir(join(projectRoot, ".aether", "verification", runId), { recursive: true });
   await writeFile(join(projectRoot, outputPath), evidenceBytes);
-  await writeFile(join(projectRoot, manifestPath), manifestContent, "utf8");
+  for (const path of changedFiles) {
+    await mkdir(join(projectRoot, path, ".."), { recursive: true });
+    await writeFile(
+      join(projectRoot, path),
+      "Changed file content for " + path + "\n",
+      "utf8",
+    );
+  }
+  const finalManifestContent = JSON.stringify(result, null, 2) + "\n";
+  await writeFile(join(projectRoot, manifestPath), finalManifestContent, "utf8");
 
   return {
     artifact_id: "verification-" + runId + "-" + stageId,
@@ -78,7 +102,7 @@ async function createVerification(runId: string, stageId: string) {
     status: "passed" as const,
     evidence_count: result.evidence.length,
     verified_at: result.verified_at,
-    sha256: createHash("sha256").update(manifestContent, "utf8").digest("hex"),
+    sha256: createHash("sha256").update(finalManifestContent, "utf8").digest("hex"),
   };
 }
 function createService(): WorkflowRunService {
@@ -167,7 +191,13 @@ describe("WorkflowRunService", () => {
       workflow,
       "discovery",
       "completed",
-      { verification: await createVerification(created.id, "discovery") },
+      {
+        verification: await createVerification(
+          created.id,
+          "discovery",
+          ["src/verified-source.ts"],
+        ),
+      },
     );
     expect(completed.stages.discovery?.status).toBe("completed");
     expect(completed.stages.implementation?.status).toBe("ready");
@@ -215,6 +245,59 @@ describe("WorkflowRunService", () => {
         { verification },
       ),
     ).rejects.toBeInstanceOf(WorkflowRunConflictError);
+  });
+
+  it("rejects a changed project file whose checksum changes after verification", async () => {
+    const created = await service.createRun(workflow, {
+      feature_description: "Detect changed source after verification",
+    });
+    await service.startRun(created.id, workflow);
+    await service.transitionStage(created.id, workflow, "discovery", "in_progress");
+    await service.transitionStage(created.id, workflow, "discovery", "verifying");
+    const sourcePath = "src/changed-after-verification.ts";
+    const verification = await createVerification(created.id, "discovery", [sourcePath]);
+    await writeFile(join(projectRoot, sourcePath), "Tampered source file.\n", "utf8");
+
+    await expect(
+      service.transitionStage(
+        created.id,
+        workflow,
+        "discovery",
+        "completed",
+        { verification },
+      ),
+    ).rejects.toThrow(/changed file checksum no longer matches/);
+  });
+
+  it("rejects symlinks inside the verification manifest path", async () => {
+    const created = await service.createRun(workflow, {
+      feature_description: "Reject manifest symlinks",
+    });
+    await service.startRun(created.id, workflow);
+    await service.transitionStage(created.id, workflow, "discovery", "in_progress");
+    await service.transitionStage(created.id, workflow, "discovery", "verifying");
+    const verification = await createVerification(created.id, "discovery");
+    const manifestPath = join(
+      projectRoot,
+      ".aether",
+      "verification",
+      created.id,
+      "discovery.json",
+    );
+    const targetPath = join(projectRoot, ".aether", "verification", created.id, "real.json");
+    await writeFile(targetPath, await (await import("node:fs/promises")).readFile(manifestPath), "utf8");
+    await (await import("node:fs/promises")).unlink(manifestPath);
+    await (await import("node:fs/promises")).symlink(targetPath, manifestPath);
+
+    await expect(
+      service.transitionStage(
+        created.id,
+        workflow,
+        "discovery",
+        "completed",
+        { verification },
+      ),
+    ).rejects.toThrow(/symbolic links/);
   });
 
   it("does not allow starting a dependent stage before its dependencies complete", async () => {

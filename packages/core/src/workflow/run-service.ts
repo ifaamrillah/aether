@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { FileStateStore } from "../state/file-state-store.js";
 import type {
@@ -628,11 +628,30 @@ export class WorkflowRunService {
         invalid(label + " is not a safe relative project path.");
       }
 
-      const absolute = resolve(root, ...path.split("/"));
-      const actual = await realpath(absolute).catch(() => invalid(label + " does not exist."));
+      let current = root;
+      const segments = path.split("/");
+      for (const [index, segment] of segments.entries()) {
+        current = resolve(current, segment);
+        const details = await lstat(current).catch(() => invalid(label + " does not exist."));
+        if (details.isSymbolicLink()) {
+          invalid(label + " must not traverse symbolic links.");
+        }
+        const isLast = index === segments.length - 1;
+        if (!isLast && !details.isDirectory()) {
+          invalid(label + " contains a non-directory path component.");
+        }
+        if (isLast && !details.isFile()) {
+          invalid(label + " is not a regular file.");
+        }
+      }
+      const actual = await realpath(current).catch(() => invalid(label + " does not exist."));
       const rel = relative(root, actual);
       if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) {
         invalid(label + " resolves outside the project root.");
+      }
+      const finalDetails = await lstat(actual);
+      if (finalDetails.isSymbolicLink() || !finalDetails.isFile()) {
+        invalid(label + " is not a regular file.");
       }
       return actual;
     };
@@ -697,17 +716,50 @@ export class WorkflowRunService {
     };
 
     const writePaths = definition.scope?.write_paths ?? [];
-    for (const rawChangedPath of validatedManifest.changed_files) {
+    const seenChangedFiles = new Set<string>();
+    for (const rawChangedFile of validatedManifest.changed_files) {
+      if (typeof rawChangedFile !== "object" || rawChangedFile === null) {
+        invalid("changed file record must be an object.");
+      }
+      const changedRecord = rawChangedFile as Record<string, unknown>;
       const changedPath =
-        typeof rawChangedPath === "string"
-          ? rawChangedPath
+        typeof changedRecord.path === "string"
+          ? changedRecord.path
           : invalid("changed file path must be a string.");
+      const changedSha =
+        typeof changedRecord.sha256 === "string"
+          ? changedRecord.sha256
+          : invalid("changed file checksum must be a string.");
+      const changedSize =
+        typeof changedRecord.size_bytes === "number"
+          ? changedRecord.size_bytes
+          : invalid("changed file size must be a number.");
+      if (
+        !/^[a-f0-9]{64}$/.test(changedSha) ||
+        !Number.isSafeInteger(changedSize) ||
+        changedSize < 0 ||
+        seenChangedFiles.has(changedPath)
+      ) {
+        invalid("changed file record is malformed or duplicated.");
+      }
+      seenChangedFiles.add(changedPath);
       if (!isWithinScope(changedPath, writePaths)) {
         invalid("changed file is outside the declared write scope.");
       }
       const changedAbsolute = await safeProjectPath(changedPath, "changed file");
-      if (!(await stat(changedAbsolute)).isFile()) {
-        invalid("changed file is not a regular file.");
+      const changedStats = await stat(changedAbsolute);
+      if (!changedStats.isFile()) {
+        invalid("changed file size or type has changed.");
+      }
+      const changedBytes = await readFile(changedAbsolute);
+      if (changedBytes.length !== changedSize) {
+        invalid("changed file size or type has changed.");
+      }
+      const changedDigest = createHash("sha256")
+        .update(changedBytes)
+        .digest("hex");
+      if (changedDigest !== changedSha) {
+        invalid("changed file checksum no longer matches.");
       }
     }
 
