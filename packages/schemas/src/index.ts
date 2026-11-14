@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import type { ErrorObject } from "ajv";
 
 export interface SchemaValidationIssue {
   path: string;
@@ -36,7 +37,7 @@ export function validateWorkflowDefinition(
 
   return {
     valid,
-    errors: (validateWorkflow.errors ?? []).map((error) => ({
+    errors: (validateWorkflow.errors ?? []).map((error: ErrorObject) => ({
       path: error.instancePath || "/",
       keyword: error.keyword,
       message: error.message ?? "Schema validation failed.",
