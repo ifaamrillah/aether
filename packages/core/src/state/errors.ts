@@ -38,3 +38,29 @@ export class EventSequenceError extends Error {
     this.name = "EventSequenceError";
   }
 }
+
+export class InvalidStageTransitionError extends Error {
+  constructor(
+    readonly stageId: string,
+    readonly from: string,
+    readonly to: string,
+  ) {
+    super(
+      `Stage "${stageId}" cannot transition from "${from}" to "${to}".`,
+    );
+    this.name = "InvalidStageTransitionError";
+  }
+}
+
+export class InvalidStageEventSequenceError extends Error {
+  constructor(
+    readonly stageId: string,
+    readonly previousSequence: number,
+    readonly actualSequence: number,
+  ) {
+    super(
+      `Stage "${stageId}" event sequence must be greater than ${previousSequence}; received ${actualSequence}.`,
+    );
+    this.name = "InvalidStageEventSequenceError";
+  }
+}
