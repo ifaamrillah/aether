@@ -102,22 +102,34 @@ export function evaluateWorkflowCondition(
       );
     }
     const expression = current.expression;
-    if (expression.op === "exists") return resolveReference(expression.ref, context).found;
-    if (expression.op === "not") return !evaluate(expression.item, depth + 1);
-    if (expression.op === "and") return expression.items.every((item) => evaluate(item, depth + 1));
-    if (expression.op === "or") return expression.items.some((item) => evaluate(item, depth + 1));
-
-    const left = resolveOperand(expression.left, context);
-    const right = resolveOperand(expression.right, context);
-    if (expression.op === "eq") return valuesEqual(left, right);
-    if (expression.op === "neq") return !valuesEqual(left, right);
-    if (expression.op === "in") {
-      if (!Array.isArray(right)) {
-        throw new WorkflowConditionEvaluationError('The right operand of "in" must resolve to an array.');
+    switch (expression.op) {
+      case "exists":
+        return resolveReference(expression.ref, context).found;
+      case "not":
+        return !evaluate(expression.item, depth + 1);
+      case "and":
+        return expression.items.every((item) => evaluate(item, depth + 1));
+      case "or":
+        return expression.items.some((item) => evaluate(item, depth + 1));
+      case "eq":
+        return valuesEqual(
+          resolveOperand(expression.left, context),
+          resolveOperand(expression.right, context),
+        );
+      case "neq":
+        return !valuesEqual(
+          resolveOperand(expression.left, context),
+          resolveOperand(expression.right, context),
+        );
+      case "in": {
+        const left = resolveOperand(expression.left, context);
+        const right = resolveOperand(expression.right, context);
+        if (!Array.isArray(right)) {
+          throw new WorkflowConditionEvaluationError('The right operand of "in" must resolve to an array.');
+        }
+        return right.some((item) => valuesEqual(left, item));
       }
-      return right.some((item) => valuesEqual(left, item));
     }
-    throw new WorkflowConditionEvaluationError("Unsupported condition operator.");
   };
   return evaluate(condition, 0);
 }

@@ -8,22 +8,30 @@ import type {
 
 function collectReferences(condition: WorkflowConditionDefinition): string[] {
   const expression = condition.expression;
-  if (expression.op === "exists") return [expression.ref];
-  if (expression.op === "not") return collectReferences(expression.item);
-  if (expression.op === "and" || expression.op === "or") {
-    return expression.items.flatMap(collectReferences);
+  switch (expression.op) {
+    case "exists":
+      return [expression.ref];
+    case "not":
+      return collectReferences(expression.item);
+    case "and":
+    case "or":
+      return expression.items.flatMap(collectReferences);
+    case "eq":
+    case "neq":
+    case "in": {
+      const references: string[] = [];
+      for (const operand of [expression.left, expression.right]) {
+        if (
+          typeof operand === "object" &&
+          operand !== null &&
+          !Array.isArray(operand) &&
+          Object.keys(operand).length === 1 &&
+          typeof (operand as { ref?: unknown }).ref === "string"
+        ) references.push((operand as { ref: string }).ref);
+      }
+      return references;
+    }
   }
-  const references: string[] = [];
-  for (const operand of [expression.left, expression.right]) {
-    if (
-      typeof operand === "object" &&
-      operand !== null &&
-      !Array.isArray(operand) &&
-      Object.keys(operand).length === 1 &&
-      typeof (operand as { ref?: unknown }).ref === "string"
-    ) references.push((operand as { ref: string }).ref);
-  }
-  return references;
 }
 
 export function getRequiredExecutionStageIds(workflow: WorkflowDefinition): Set<string> {

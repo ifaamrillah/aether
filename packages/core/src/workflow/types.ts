@@ -9,8 +9,11 @@ export interface WorkflowInputDefinition {
 export type WorkflowConditionOperand = unknown;
 
 export type WorkflowConditionExpression =
-  | { op: "eq" | "neq" | "in"; left: WorkflowConditionOperand; right: WorkflowConditionOperand }
-  | { op: "and" | "or"; items: WorkflowConditionDefinition[] }
+  | { op: "eq"; left: WorkflowConditionOperand; right: WorkflowConditionOperand }
+  | { op: "neq"; left: WorkflowConditionOperand; right: WorkflowConditionOperand }
+  | { op: "in"; left: WorkflowConditionOperand; right: WorkflowConditionOperand }
+  | { op: "and"; items: WorkflowConditionDefinition[] }
+  | { op: "or"; items: WorkflowConditionDefinition[] }
   | { op: "not"; item: WorkflowConditionDefinition }
   | { op: "exists"; ref: string };
 
