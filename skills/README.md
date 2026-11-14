@@ -19,6 +19,16 @@ Aether skills use the portable Agent Skills folder format. Each skill has a requ
 | `skill-creator` | Create portable, auditable skills |
 | `skill-evaluator` | Evaluate skill quality, safety, and portability |
 
+| brainstorming | Explore and compare solution approaches |
+| agent-orchestration | Coordinate native subagents using task contracts and dependency waves |
+| ui-ux-research | Research journeys, interface conventions, and accessibility |
+| design-system | Define reusable interface tokens and component patterns |
+| wireframing | Create low-fidelity layouts and interaction flows |
+| prototyping | Build reviewable UI prototypes before specification |
+| visual-testing | Verify browser-rendered UI with screenshots and traces |
+| accessibility-audit | Audit keyboard, semantic, focus, and assistive behavior |
+| threat-modeling | Identify trust boundaries, attack paths, and mitigations |
+
 ## Use
 
 Skills can be read and used independently of the Aether CLI. A compatible agent should load only the skill whose description matches the current task, then follow its procedure and guardrails.
