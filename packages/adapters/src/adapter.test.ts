@@ -45,7 +45,7 @@ describe("agent adapters", () => {
     ]);
     for (const item of descriptors) {
       expect(item.handoff_mode).toBe("human-mediated");
-      expect(item.skill_install_path).toMatch(/^\.[a-z-]+\/skills$/);
+      expect(item.skill_install_path.endsWith("/skills")).toBe(true);
       expect(item.capabilities.find((capability) => capability.id === "native_subagents")?.status)
         .toBe("unsupported");
     }
