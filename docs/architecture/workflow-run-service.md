@@ -40,7 +40,11 @@ The workflow definition is supplied for each operation. This makes version match
 
 Every state mutation creates an event with a monotonically increasing run-wide sequence. FileStateStore.commitEventAndSnapshot holds the run lock while checking the expected sequence, appending and fsyncing the event, and atomically replacing the run snapshot.
 
-A filesystem/process crash between the durable event append and snapshot replacement can still leave a pending event. This is not a multi-file filesystem transaction. The service detects that condition and raises RunRecoveryRequiredError instead of continuing from stale state. Deterministic event replay and explicit recovery are a subsequent milestone.
+A filesystem/process crash between the durable event append and snapshot replacement can still leave a pending event. This is not a multi-file filesystem transaction. The service detects that condition and raises RunRecoveryRequiredError instead of continuing from stale state.
+
+`recoverRun` replays the currently supported run-status and stage-transition events in sequence order. It checks event identity, status transitions, dependency readiness, and stage lifecycle rules before writing the recovered snapshot. Unknown events fail closed and remain in the append-only log. Once replay completes, a running workflow re-evaluates eligible pending stages so a crash after `run.started` does not leave the workflow without ready work.
+
+`pauseRun`, `resumeRun`, and `cancelRun` persist lifecycle changes through the same event/snapshot mechanism. Resume first attempts recovery using the workflow definition pinned by ID and version.
 
 ## Dependency semantics
 
@@ -56,12 +60,13 @@ Do not pass raw credentials, API keys, or other secrets as workflow inputs. The 
 
 ## Current limits
 
-- No resume, pause, cancel, or crash event replay yet.
+- Replay supports the event types currently emitted by WorkflowRunService; unknown event types require an explicit reducer before they can be recovered.
+- A hard crash between event append and snapshot write is recoverable, but the two-file update is not an atomic filesystem transaction.
+- A process crash while holding a lock can leave a stale lock file; automatic stale-lock reclamation is not implemented.
 - No conditional stage evaluation.
 - No optional dependency skip policy.
 - No explicit selection mechanism for independent optional stages.
 - No agent execution or delegation.
 - No output/verification artifact enforcement.
-- No multi-process event-snapshot recovery after a hard process crash.
 
-These are intentionally separate milestones; the service currently provides a deterministic local run lifecycle baseline.
+These constraints are deliberate. Recovery fails closed rather than guessing how to interpret unknown events or reclaim locks.

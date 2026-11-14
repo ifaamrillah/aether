@@ -8,6 +8,7 @@ import type {
   WorkflowRunSnapshot,
 } from "../state/types.js";
 import { transitionStageState } from "../state/stage-transitions.js";
+import { StateIntegrityError } from "../state/errors.js";
 import {
   RunRecoveryRequiredError,
   WorkflowInputValidationError,
@@ -34,6 +35,48 @@ const ACTIVE_STAGE_STATUSES = new Set<StageStatus>([
   "verifying",
   "blocked",
 ]);
+
+const ALLOWED_RUN_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
+  created: ["running", "cancelled"],
+  running: ["paused", "blocked", "awaiting_approval", "completed", "failed", "cancelled"],
+  paused: ["running", "cancelled"],
+  blocked: ["running", "awaiting_approval", "failed", "cancelled"],
+  awaiting_approval: ["running", "blocked", "failed", "cancelled"],
+  completed: [],
+  failed: ["running", "blocked", "awaiting_approval", "cancelled"],
+  cancelled: [],
+};
+
+const RUN_EVENT_TYPES = new Set([
+  "run.started",
+  "run.status_changed",
+  "run.paused",
+  "run.resumed",
+  "run.completed",
+  "run.cancelled",
+]);
+
+const STAGE_STATUSES: readonly StageStatus[] = [
+  "pending", "ready", "in_progress", "blocked", "awaiting_approval",
+  "verifying", "completed", "failed", "skipped", "stale",
+];
+
+function isRunStatus(value: unknown): value is RunStatus {
+  return typeof value === "string" &&
+    ["created", "running", "paused", "blocked", "awaiting_approval", "completed", "failed", "cancelled"].includes(value);
+}
+
+function isStageStatus(value: unknown): value is StageStatus {
+  return typeof value === "string" && STAGE_STATUSES.includes(value as StageStatus);
+}
+
+function assertAllowedRunTransition(from: RunStatus, to: RunStatus): void {
+  if (!ALLOWED_RUN_TRANSITIONS[from].includes(to)) {
+    throw new WorkflowRunConflictError(
+      'Run cannot transition from "' + from + '" to "' + to + '".',
+    );
+  }
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -206,6 +249,226 @@ export class WorkflowRunService {
     return loaded.snapshot;
   }
 
+  /**
+   * Replays known, deterministic events that were appended but not reflected
+   * in the run snapshot. Unknown events fail closed and remain in the log.
+   */
+  async recoverRun(
+    runId: string,
+    workflow: WorkflowDefinition,
+  ): Promise<WorkflowRunSnapshot> {
+    const semanticIssues = validateWorkflowSemantics(workflow);
+    if (semanticIssues.length > 0) {
+      throw new WorkflowRunConflictError(
+        semanticIssues.map((issue) => issue.message).join("\n"),
+      );
+    }
+
+    const loaded = await this.store.loadRun(runId);
+    let snapshot = loaded.snapshot;
+    if (
+      snapshot.workflow_id !== workflow.id ||
+      snapshot.workflow_version !== workflow.version
+    ) {
+      throw new WorkflowRunConflictError(
+        'Run "' + runId + '" is pinned to workflow ' +
+          snapshot.workflow_id + "@" + snapshot.workflow_version +
+          ", not " + workflow.id + "@" + workflow.version + ".",
+      );
+    }
+
+    for (const event of loaded.pendingEvents) {
+      if (event.sequence !== snapshot.last_event_sequence + 1) {
+        throw new StateIntegrityError(
+          'Run "' + runId + '" has a non-contiguous pending event sequence.',
+        );
+      }
+      if (!Number.isFinite(Date.parse(event.timestamp))) {
+        throw new StateIntegrityError(
+          'Run "' + runId + '" contains an event with an invalid timestamp.',
+        );
+      }
+
+      if (event.type === "stage.transitioned") {
+        if (
+          event.entity.type !== "stage" ||
+          event.entity.id !== event.payload.stage_id ||
+          typeof event.payload.stage_id !== "string" ||
+          !isStageStatus(event.payload.to)
+        ) {
+          throw new StateIntegrityError(
+            'Run "' + runId + '" contains a malformed stage transition event.',
+          );
+        }
+
+        const stageId = event.payload.stage_id;
+        const definition = workflow.stages.find((stage) => stage.id === stageId);
+        const currentStage = snapshot.stages[stageId];
+        if (!definition || !currentStage) {
+          throw new StateIntegrityError(
+            'Run "' + runId + '" references unknown stage "' + stageId + '".',
+          );
+        }
+
+        const targetStatus = event.payload.to;
+        if (
+          targetStatus === "ready" &&
+          !this.dependenciesCompleted(definition, snapshot)
+        ) {
+          throw new StateIntegrityError(
+            'Run "' + runId + '" recorded stage "' + stageId +
+              '" as ready before its dependencies completed.',
+          );
+        }
+        if (
+          targetStatus === "skipped" &&
+          (definition.required || this.requiredExecutionStageIds(workflow).has(stageId))
+        ) {
+          throw new StateIntegrityError(
+            'Run "' + runId + '" recorded a required stage as skipped.',
+          );
+        }
+        if (
+          event.payload.reason !== undefined &&
+          typeof event.payload.reason !== "string"
+        ) {
+          throw new StateIntegrityError(
+            'Run "' + runId + '" contains a malformed stage transition reason.',
+          );
+        }
+
+        const nextStage = transitionStageState(currentStage, {
+          to: targetStatus,
+          event_sequence: event.sequence,
+          timestamp: event.timestamp,
+          ...(typeof event.payload.reason === "string"
+            ? { reason: event.payload.reason }
+            : {}),
+        });
+        const stages = { ...snapshot.stages, [stageId]: nextStage };
+        snapshot = {
+          ...snapshot,
+          stages,
+          current_stage_ids: this.currentStageIds(stages),
+          last_event_sequence: event.sequence,
+          snapshot_sequence: event.sequence,
+          updated_at: event.timestamp,
+        };
+        continue;
+      }
+
+      if (RUN_EVENT_TYPES.has(event.type)) {
+        if (
+          event.entity.type !== "run" ||
+          event.entity.id !== runId ||
+          event.payload.from !== snapshot.status ||
+          !isRunStatus(event.payload.to)
+        ) {
+          throw new StateIntegrityError(
+            'Run "' + runId + '" contains a malformed run status event.',
+          );
+        }
+
+        const nextStatus = event.payload.to;
+        const expectedStatusByEvent: Record<string, RunStatus> = {
+          "run.started": "running",
+          "run.paused": "paused",
+          "run.resumed": "running",
+          "run.completed": "completed",
+          "run.cancelled": "cancelled",
+        };
+        const expectedStatus = expectedStatusByEvent[event.type];
+        if (expectedStatus !== undefined && nextStatus !== expectedStatus) {
+          throw new StateIntegrityError(
+            'Run "' + runId + '" event "' + event.type +
+              '" has an invalid target status.',
+          );
+        }
+
+        assertAllowedRunTransition(snapshot.status, nextStatus);
+        snapshot = {
+          ...snapshot,
+          status: nextStatus,
+          current_stage_ids: nextStatus === "cancelled" ? [] : snapshot.current_stage_ids,
+          last_event_sequence: event.sequence,
+          snapshot_sequence: event.sequence,
+          updated_at: event.timestamp,
+        };
+        continue;
+      }
+
+      throw new StateIntegrityError(
+        'Run "' + runId + '" contains unsupported event type "' + event.type +
+          '". Recovery stopped without discarding the event.',
+      );
+    }
+
+    if (loaded.pendingEvents.length > 0) {
+      await this.store.writeSnapshot(snapshot);
+    }
+
+    // A crash may occur after run.started was logged but before its root
+    // stages were promoted. Reconcile eligible stages after replay.
+    if (snapshot.status === "running") {
+      snapshot = await this.promoteReadyStages(snapshot, workflow);
+      snapshot = await this.refreshRunStatus(snapshot, workflow);
+    }
+
+    return snapshot;
+  }
+
+  async pauseRun(runId: string): Promise<WorkflowRunSnapshot> {
+    const snapshot = await this.getRun(runId);
+    if (snapshot.status !== "running") {
+      throw new WorkflowRunConflictError(
+        'Run "' + runId + '" can only be paused while running.',
+      );
+    }
+    return this.commitRunStatus(
+      snapshot,
+      "paused",
+      "run.paused",
+      this.timestamp(),
+    );
+  }
+
+  async resumeRun(
+    runId: string,
+    workflow: WorkflowDefinition,
+  ): Promise<WorkflowRunSnapshot> {
+    let snapshot = await this.recoverRun(runId, workflow);
+    if (snapshot.status !== "paused") {
+      throw new WorkflowRunConflictError(
+        'Run "' + runId + '" can only be resumed while paused; current status is "' +
+          snapshot.status + '".',
+      );
+    }
+
+    snapshot = await this.commitRunStatus(
+      snapshot,
+      "running",
+      "run.resumed",
+      this.timestamp(),
+    );
+    snapshot = await this.promoteReadyStages(snapshot, workflow);
+    return this.refreshRunStatus(snapshot, workflow);
+  }
+
+  async cancelRun(runId: string): Promise<WorkflowRunSnapshot> {
+    const snapshot = await this.getRun(runId);
+    if (snapshot.status === "completed" || snapshot.status === "cancelled") {
+      throw new WorkflowRunConflictError(
+        'Run "' + runId + '" is already terminal and cannot be cancelled.',
+      );
+    }
+    return this.commitRunStatus(
+      snapshot,
+      "cancelled",
+      "run.cancelled",
+      this.timestamp(),
+    );
+  }
+
   async startRun(
     runId: string,
     workflow: WorkflowDefinition,
@@ -231,7 +494,7 @@ export class WorkflowRunService {
     options: StageTransitionOptions = {},
   ): Promise<WorkflowRunSnapshot> {
     let snapshot = await this.loadConsistentRun(runId, workflow);
-    if (["created", "completed", "cancelled"].includes(snapshot.status)) {
+    if (["created", "paused", "completed", "cancelled"].includes(snapshot.status)) {
       throw new WorkflowRunConflictError(
         'Run "' + runId + '" cannot change stage state while status is "' + snapshot.status + '".',
       );
@@ -425,11 +688,13 @@ export class WorkflowRunService {
     timestamp: string,
   ): Promise<WorkflowRunSnapshot> {
     if (current.status === status) return current;
+    assertAllowedRunTransition(current.status, status);
 
     const sequence = current.last_event_sequence + 1;
     const next: WorkflowRunSnapshot = {
       ...current,
       status,
+      current_stage_ids: status === "cancelled" ? [] : current.current_stage_ids,
       last_event_sequence: sequence,
       snapshot_sequence: sequence,
       updated_at: timestamp,

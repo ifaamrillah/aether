@@ -24,3 +24,15 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: node apps/cli/dist/index.js workflow validate workflows/feature.yaml
+      - name: Smoke test workflow lifecycle CLI
+        shell: bash
+        run: |
+          output="$(node apps/cli/dist/index.js workflow run workflows/feature.yaml --input 'feature_description=CI lifecycle smoke test')"
+          echo "$output"
+          run_id="$(printf '%s\n' "$output" | sed -n 's/^Run: //p' | head -n 1)"
+          test -n "$run_id"
+          node apps/cli/dist/index.js workflow status "$run_id"
+          node apps/cli/dist/index.js workflow pause "$run_id"
+          node apps/cli/dist/index.js workflow resume "$run_id" --file workflows/feature.yaml
+          node apps/cli/dist/index.js workflow cancel "$run_id"
+

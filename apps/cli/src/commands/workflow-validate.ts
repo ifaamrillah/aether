@@ -3,6 +3,10 @@ import { buildExecutionWaves, validateWorkflowSemantics } from "@aether/core";
 import type { WorkflowDefinition } from "@aether/core";
 import { validateWorkflowDefinition } from "@aether/schemas";
 
+export type WorkflowDefinitionParseResult =
+  | { ok: true; definition: WorkflowDefinition }
+  | { ok: false; errors: string[] };
+
 export type WorkflowContentValidation =
   | {
       ok: true;
@@ -15,9 +19,10 @@ export type WorkflowContentValidation =
       errors: string[];
     };
 
-export function validateWorkflowContent(
+/** Parses YAML and applies both structural and semantic workflow validation. */
+export function parseWorkflowDefinition(
   content: string,
-): WorkflowContentValidation {
+): WorkflowDefinitionParseResult {
   let parsed: unknown;
 
   try {
@@ -36,7 +41,7 @@ export function validateWorkflowContent(
     return {
       ok: false,
       errors: schemaResult.errors.map(
-        (issue) => `${issue.path}: ${issue.message} (${issue.keyword})`,
+        (issue) => issue.path + ": " + issue.message + " (" + issue.keyword + ")",
       ),
     };
   }
@@ -47,12 +52,21 @@ export function validateWorkflowContent(
     return {
       ok: false,
       errors: semanticIssues.map(
-        (issue) => `${issue.path}: ${issue.message} [${issue.code}]`,
+        (issue) => issue.path + ": " + issue.message + " [" + issue.code + "]",
       ),
     };
   }
 
-  const plan = buildExecutionWaves(definition);
+  return { ok: true, definition };
+}
+
+export function validateWorkflowContent(
+  content: string,
+): WorkflowContentValidation {
+  const parsed = parseWorkflowDefinition(content);
+  if (!parsed.ok) return parsed;
+
+  const plan = buildExecutionWaves(parsed.definition);
   if (!plan.ok) {
     return {
       ok: false,
@@ -62,8 +76,8 @@ export function validateWorkflowContent(
 
   return {
     ok: true,
-    workflowId: definition.id,
-    version: definition.version,
+    workflowId: parsed.definition.id,
+    version: parsed.definition.version,
     waves: plan.waves,
   };
 }

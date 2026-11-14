@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { validateWorkflowContent } from "./workflow-validate.js";
+import {
+  parseWorkflowDefinition,
+  validateWorkflowContent,
+} from "./workflow-validate.js";
 
 const validWorkflow = `schema_version: 1
 id: feature-development
@@ -22,14 +25,14 @@ completion:
     - implementation
 `;
 
-describe("validateWorkflowContent", () => {
-  it("validates and plans a valid YAML workflow", () => {
-    expect(validateWorkflowContent(validWorkflow)).toEqual({
-      ok: true,
-      workflowId: "feature-development",
-      version: 1,
-      waves: [["discovery"], ["implementation"]],
-    });
+describe("workflow definition parsing", () => {
+  it("returns a validated workflow definition for execution", () => {
+    const result = parseWorkflowDefinition(validWorkflow);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.definition.id).toBe("feature-development");
+      expect(result.definition.stages).toHaveLength(2);
+    }
   });
 
   it("rejects workflows with unresolved stage dependencies", () => {
@@ -38,16 +41,26 @@ describe("validateWorkflowContent", () => {
       "- missing-stage\ncompletion:",
     );
 
-    const result = validateWorkflowContent(invalid);
+    const result = parseWorkflowDefinition(invalid);
     expect(result.ok).toBe(false);
-
     if (!result.ok) {
       expect(result.errors.join("\n")).toContain("unknown_dependency");
     }
   });
 
   it("reports malformed YAML without throwing", () => {
-    const result = validateWorkflowContent("stages: [unclosed");
+    const result = parseWorkflowDefinition("stages: [unclosed");
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("validateWorkflowContent", () => {
+  it("validates and plans a valid YAML workflow", () => {
+    expect(validateWorkflowContent(validWorkflow)).toEqual({
+      ok: true,
+      workflowId: "feature-development",
+      version: 1,
+      waves: [["discovery"], ["implementation"]],
+    });
   });
 });

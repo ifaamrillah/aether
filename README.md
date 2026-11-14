@@ -30,12 +30,23 @@ pnpm install
 pnpm check
 ```
 
-Validate the starter workflow:
+Build and validate the CLI:
 
 ```bash
 pnpm --filter @aether/cli build
 node apps/cli/dist/index.js workflow validate workflows/feature.yaml
 ```
+
+Start a local workflow run:
+
+```bash
+node apps/cli/dist/index.js workflow run workflows/feature.yaml \
+  --input 'feature_description=Add account settings'
+```
+
+The CLI persists run state under `.aether/runs/`. Use the printed run ID with `workflow status`, `workflow pause`, `workflow resume --file <workflow-file>`, `workflow recover --file <workflow-file>`, or `workflow cancel`.
+
+The current CLI manages workflow lifecycle and prepares eligible stages; platform-native agent execution is not wired into this command yet.
 
 ## Repository layout
 

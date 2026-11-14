@@ -37,7 +37,9 @@ A lock conflict raises `RunLockedError`. The initial implementation does not aut
 
 Each snapshot records both `last_event_sequence` and `snapshot_sequence`. They must match and identify the final event incorporated into that snapshot.
 
-When the event log contains later events, `loadRun` returns them in `pendingEvents`. This makes the gap explicit to a recovery layer; the current store does not silently replay arbitrary event payloads into state.
+When the event log contains later events, `loadRun` returns them in `pendingEvents`. `WorkflowRunService.recoverRun` replays only supported, validated run-status and stage-transition events in sequence order, then writes the reconstructed snapshot. Unknown event types or inconsistent payloads stop recovery without discarding the log.
+
+After replay, a running workflow reconciles eligible stages that may not have been promoted before the interruption. Recovery is idempotent: a second recovery with no new events does not append duplicate transitions.
 
 ## Example
 
@@ -53,6 +55,12 @@ console.log(loaded.pendingEvents);
 
 Creating a run requires an initial snapshot and its sequence-1 event. Appending events and writing snapshots are separate operations so that callers can define domain-specific transitions. A snapshot may only be written when it incorporates the latest persisted event.
 
+## Recovery boundaries
+
+The event append and snapshot replacement occur under one per-run lock, but they are two durable filesystem writes. A process crash between them can leave a valid event beyond the snapshot sequence. The recovery service can replay supported event types and publish a new snapshot. If the event is malformed or unknown, recovery stops and preserves the event log for inspection.
+
+A hard crash can also leave a stale lock file. Aether does not automatically delete stale locks in this version because PID reuse, shared filesystems, and cross-platform process identity make automatic reclamation unsafe without a stronger lease protocol.
+
 ## Current limits
 
-This implementation is local-first and intended for one active writer per run. It is not a distributed lock service, database, OS sandbox, or complete crash-recovery engine. Future work will add domain-level state transition validation, schema validation of persisted records, stale-lock recovery, event replay policies, and CLI commands for run creation/status/resume.
+This implementation is local-first and intended for one active writer per run. It is not a distributed lock service, database, or OS sandbox. Recovery is deterministic for the event types emitted by the current WorkflowRunService; unknown event types fail closed.

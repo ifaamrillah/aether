@@ -269,4 +269,68 @@ describe("WorkflowRunService", () => {
     expect(done.status).toBe("running");
     expect(completed.stages["optional-setup"]?.attempt).toBe(1);
   });
+  it("pauses and resumes a run while preserving ready stage state", async () => {
+    const created = await service.createRun(workflow, {
+      feature_description: "Add settings",
+    });
+    await service.startRun(created.id, workflow);
+
+    const paused = await service.pauseRun(created.id);
+    expect(paused.status).toBe("paused");
+    expect(paused.stages.discovery?.status).toBe("ready");
+
+    await expect(
+      service.transitionStage(created.id, workflow, "discovery", "in_progress"),
+    ).rejects.toBeInstanceOf(WorkflowRunConflictError);
+
+    const resumed = await service.resumeRun(created.id, workflow);
+    expect(resumed.status).toBe("running");
+    expect(resumed.stages.discovery?.status).toBe("ready");
+  });
+
+  it("recovers an event appended before the snapshot was updated", async () => {
+    const created = await service.createRun(workflow, {
+      feature_description: "Recover an interrupted start",
+    });
+    const store = new FileStateStore(projectRoot);
+    await store.appendEvent(created.id, {
+      schema_version: 1,
+      event_id: "event_interrupted_start",
+      run_id: created.id,
+      sequence: 2,
+      type: "run.started",
+      timestamp: "2026-11-15T01:00:01.000Z",
+      actor: { type: "system", id: "aether" },
+      entity: { type: "run", id: created.id },
+      payload: { from: "created", to: "running" },
+    });
+
+    const recovered = await service.recoverRun(created.id, workflow);
+    expect(recovered.status).toBe("running");
+    expect(recovered.stages.discovery?.status).toBe("ready");
+    expect(recovered.last_event_sequence).toBe(3);
+
+    const events = await store.readEvents(created.id);
+    expect(events.map((event) => event.sequence)).toEqual([1, 2, 3]);
+
+    const recoveredAgain = await service.recoverRun(created.id, workflow);
+    expect(recoveredAgain.last_event_sequence).toBe(3);
+    expect((await store.readEvents(created.id)).map((event) => event.sequence))
+      .toEqual([1, 2, 3]);
+  });
+
+  it("cancels a run and rejects later resume attempts", async () => {
+    const created = await service.createRun(workflow, {
+      feature_description: "Cancel a run",
+    });
+    await service.startRun(created.id, workflow);
+    const cancelled = await service.cancelRun(created.id);
+    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.current_stage_ids).toEqual([]);
+
+    await expect(
+      service.resumeRun(created.id, workflow),
+    ).rejects.toBeInstanceOf(WorkflowRunConflictError);
+  });
+
 });
