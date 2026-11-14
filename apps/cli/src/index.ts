@@ -29,6 +29,7 @@ import {
   validateWorkflowContent,
 } from "./commands/workflow-validate.js";
 import { parseWorkflowRunOptions } from "./commands/workflow-inputs.js";
+import { validateSkills } from "./commands/skill-validate.js";
 
 function printHelp(): void {
   console.log(`Aether — AI Engineering Harness
@@ -39,6 +40,7 @@ Usage:
 Commands:
   version                                      Show CLI and core version
   workflow validate <file>                    Validate workflow YAML and show execution waves
+  skill validate [path]                        Validate portable Agent Skills (default: skills/)
   workflow run <file> [--input name=value]     Create and start a workflow run
   workflow status <run-id>                    Show persisted run and pending recovery events
   workflow handoff <run-id> --file <file>      Generate agent handoffs for ready stages
@@ -448,6 +450,38 @@ async function runWorkflowCommand(args: string[]): Promise<number> {
   return 2;
 }
 
+async function runSkillCommand(args: string[]): Promise<number> {
+  const [subcommand, target, ...extra] = args;
+  if (subcommand !== "validate") {
+    if (subcommand === "help" || subcommand === undefined) {
+      console.log("Usage: aether skill validate [path]");
+      return 0;
+    }
+    throw new Error("Unknown skill command: " + subcommand);
+  }
+  if (extra.length > 0) throw new Error("skill validate accepts at most one path.");
+  const targetPath = target ?? "skills";
+  const results = await validateSkills(targetPath);
+  let errorCount = 0;
+  let warningCount = 0;
+
+  for (const result of results) {
+    console.log((result.valid ? "PASS " : "FAIL ") + result.path);
+    for (const issue of result.issues) {
+      if (issue.severity === "error") errorCount += 1;
+      else warningCount += 1;
+      console.log("  " + issue.severity.toUpperCase() + " [" + issue.code + "] " + issue.message);
+    }
+  }
+
+  console.log(
+    "Validated " + results.length + " skill(s): " +
+      results.filter((result) => result.valid).length + " valid, " +
+      errorCount + " error(s), " + warningCount + " warning(s).",
+  );
+  return errorCount === 0 ? 0 : 1;
+}
+
 async function main(args: string[]): Promise<number> {
   const [command = "help", ...rest] = args;
 
@@ -461,6 +495,15 @@ async function main(args: string[]): Promise<number> {
       return await runWorkflowCommand(rest);
     } catch (error) {
       console.error(error instanceof Error ? error.message : "Workflow command failed.");
+      return 1;
+    }
+  }
+
+  if (command === "skill") {
+    try {
+      return await runSkillCommand(rest);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Skill command failed.");
       return 1;
     }
   }

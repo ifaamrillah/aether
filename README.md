@@ -77,7 +77,7 @@ The current adapters produce portable instructions and collect results. They do 
 - `packages/core`: workflow planning, file-backed run state, delegation contracts, and evidence verification
 - `packages/adapters`: portable handoff adapters for generic agents, Claude Code, Codex, OpenCode, Gemini CLI, and Antigravity
 - `packages/schemas`: canonical JSON Schema contracts and structural validation
-- `skills`: portable Agent Skills
+- `skills`: portable Agent Skills, validated by `aether skill validate`
 - `workflows`: declarative workflow definitions
 - `docs`: architecture and contributor documentation
 

@@ -24,6 +24,7 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: node apps/cli/dist/index.js workflow validate workflows/feature.yaml
+      - run: node apps/cli/dist/index.js skill validate skills
       - name: Smoke test workflow lifecycle CLI
         shell: bash
         run: |
