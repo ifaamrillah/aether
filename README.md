@@ -125,6 +125,14 @@ The adapter registry also declares each host's skill discovery directory. Curren
 
 These paths follow the platforms' documented project-level skill discovery conventions: [Claude Code](https://code.claude.com/docs/en/skills), [Codex](https://developers.openai.com/codex/skills), [OpenCode](https://opencode.ai/docs/skills/), [Gemini CLI](https://geminicli.com/docs/cli/skills/), and [Antigravity](https://antigravity.google/docs/skills).
 
+## UI design workflow
+
+For a UI change that needs explicit design work before engineering specification, use the dedicated UI Improvement workflow. Validate and run workflows/ui-improvement.yaml with the desired UI change as the ui_change input.
+
+It requires UI/UX research, design-system definition, wireframing, and a reviewable prototype before specification. Visual testing and accessibility audit follow implementation. Use the agent-orchestration skill for native subagent coordination when the active host exposes that capability; otherwise the workflow can be performed sequentially.
+
+See docs/guides/ui-improvement-workflow.md.
+
 ## Repository layout
 
 - `apps/cli`: developer interface

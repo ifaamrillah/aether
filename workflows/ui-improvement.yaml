@@ -1,0 +1,159 @@
+schema_version: 1
+id: ui-improvement
+version: 1
+name: UI Improvement
+description: Research, design, prototype, specify, implement, and verify a user-interface change. Design artifacts are required before the implementation specification is finalized.
+
+inputs:
+  - name: ui_change
+    type: string
+    required: true
+
+stages:
+  - id: discovery
+    skill: discovery
+    required: true
+    scope:
+      read_paths: [src/**, app/**, pages/**, docs/**]
+      write_paths: [docs/discovery/**]
+    acceptance_criteria:
+      - Describe the user task, current behavior, and desired outcome.
+      - Identify relevant screens, routes, and technical constraints.
+
+  - id: ui-ux-research
+    skill: ui-ux-research
+    required: true
+    depends_on: [discovery]
+    scope:
+      read_paths: [src/**, app/**, pages/**, docs/**]
+      write_paths: [docs/design/research/**]
+    acceptance_criteria:
+      - Record user journey, existing interface conventions, and sourced design references.
+      - Identify responsive, keyboard, accessibility, and interface-state requirements.
+
+  - id: design-system
+    skill: design-system
+    required: true
+    depends_on: [ui-ux-research]
+    scope:
+      read_paths: [src/**, app/**, pages/**, styles/**, docs/design/research/**]
+      write_paths: [docs/design/system/**]
+    acceptance_criteria:
+      - Reuse and document relevant tokens and components.
+      - Define necessary variants, responsive rules, and interaction states.
+
+  - id: wireframing
+    skill: wireframing
+    required: true
+    depends_on: [design-system]
+    scope:
+      read_paths: [docs/design/research/**, docs/design/system/**, src/**]
+      write_paths: [docs/design/wireframes/**]
+    acceptance_criteria:
+      - Provide low-fidelity layouts for the changed screens.
+      - Cover primary, empty, loading, error, and success states where relevant.
+
+  - id: prototyping
+    skill: prototyping
+    required: true
+    depends_on: [wireframing]
+    scope:
+      read_paths: [docs/design/**, src/**]
+      write_paths: [docs/design/prototypes/**]
+    acceptance_criteria:
+      - Provide a reviewable prototype or document why an executable prototype is unsuitable.
+      - Capture responsive or interaction evidence for the critical path.
+      - Record design feedback and decisions before specification.
+
+  - id: specification
+    skill: specification
+    required: true
+    depends_on: [prototyping]
+    scope:
+      read_paths: [docs/design/**, src/**]
+      write_paths: [docs/specifications/**]
+    acceptance_criteria:
+      - Translate the accepted design into functional and non-functional requirements.
+      - Define component behavior, states, responsive behavior, and accessibility expectations.
+
+  - id: planning
+    skill: implementation-planning
+    required: true
+    depends_on: [specification]
+    scope:
+      read_paths: [docs/design/**, docs/specifications/**, src/**]
+      write_paths: [docs/plans/**]
+    acceptance_criteria:
+      - Identify files, component ownership, dependencies, and verification tasks.
+      - Keep shared component and token changes under explicit ownership.
+
+  - id: implementation
+    skill: implementation
+    required: true
+    depends_on: [planning]
+    scope:
+      read_paths: [docs/design/**, docs/specifications/**, src/**, app/**, pages/**]
+      write_paths: [src/**, app/**, pages/**, styles/**, tests/**]
+    acceptance_criteria:
+      - Implement the approved interface behavior and design.
+      - Add or update component and interaction tests.
+      - Preserve application conventions and avoid unrelated redesign.
+
+  - id: visual-testing
+    skill: visual-testing
+    required: true
+    depends_on: [implementation]
+    scope:
+      read_paths: [src/**, app/**, pages/**, tests/**]
+      write_paths: [docs/testing/visual/**]
+    acceptance_criteria:
+      - Exercise the critical UI journey at relevant viewports.
+      - Attach screenshots, test output, and relevant browser traces.
+
+  - id: accessibility-audit
+    skill: accessibility-audit
+    required: true
+    depends_on: [implementation]
+    scope:
+      read_paths: [src/**, app/**, pages/**, tests/**]
+      write_paths: [docs/testing/accessibility/**]
+    acceptance_criteria:
+      - Test keyboard navigation, focus, labels, and relevant assistive states.
+      - Record automated checks and manual review separately.
+
+  - id: code-review
+    skill: code-review
+    required: true
+    depends_on: [visual-testing, accessibility-audit]
+    scope:
+      read_paths: [src/**, app/**, pages/**, styles/**, tests/**]
+      write_paths: [docs/reviews/**]
+    acceptance_criteria:
+      - Review the final diff against the approved design and specification.
+      - Report accessibility, performance, regression, and maintainability concerns.
+
+  - id: documentation
+    skill: documentation
+    required: true
+    depends_on: [code-review]
+    scope:
+      read_paths: [src/**, docs/design/**, docs/specifications/**]
+      write_paths: [docs/**]
+    acceptance_criteria:
+      - Update durable UI, component, and interaction documentation.
+      - Link approved design artifacts and verification reports.
+
+completion:
+  required_stages:
+    - discovery
+    - ui-ux-research
+    - design-system
+    - wireframing
+    - prototyping
+    - specification
+    - planning
+    - implementation
+    - visual-testing
+    - accessibility-audit
+    - code-review
+    - documentation
