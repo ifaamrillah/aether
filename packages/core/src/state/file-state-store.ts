@@ -34,14 +34,14 @@ function errorCode(error: unknown): string | undefined {
 function validateRunId(runId: string): void {
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(runId)) {
     throw new StateIntegrityError(
-      `Invalid run id "${runId}". Use 1-128 letters, digits, underscores, or hyphens.`,
+      'Invalid run id "' + runId + '". Use 1-128 letters, digits, underscores, or hyphens.',
     );
   }
 }
 
 async function atomicWriteFile(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.tmp-${randomUUID()}`;
+  const temporaryPath = path + ".tmp-" + randomUUID();
   const handle = await open(temporaryPath, "wx", 0o600);
 
   try {
@@ -59,12 +59,6 @@ async function atomicWriteFile(path: string, content: string): Promise<void> {
   }
 }
 
-/**
- * Local-first, file-backed run state.
- *
- * Each run has one exclusive writer lock. Snapshots are replaced atomically;
- * the append-only event log is fsynced after each appended event.
- */
 export class FileStateStore {
   private readonly projectRoot: string;
   private readonly runsDirectory: string;
@@ -115,7 +109,7 @@ export class FileStateStore {
 
       const temporaryDirectory = join(
         this.runsDirectory,
-        `.${snapshot.id}.tmp-${randomUUID()}`,
+        "." + snapshot.id + ".tmp-" + randomUUID(),
       );
 
       await mkdir(temporaryDirectory, { recursive: false });
@@ -155,27 +149,27 @@ export class FileStateStore {
       } catch (error) {
         if (errorCode(error) === "ENOENT") throw new RunNotFoundError(runId);
         if (error instanceof SyntaxError) {
-          throw new StateIntegrityError(`Run "${runId}" has invalid JSON in run.json.`, { cause: error });
+          throw new StateIntegrityError('Run "' + runId + '" has invalid JSON in run.json.', { cause: error });
         }
         throw error;
       }
 
       if (snapshot.schema_version !== 1 || snapshot.id !== runId) {
-        throw new StateIntegrityError(`Run "${runId}" has an unsupported or mismatched snapshot.`);
+        throw new StateIntegrityError('Run "' + runId + '" has an unsupported or mismatched snapshot.');
       }
 
       const events = await this.readEventsUnlocked(runId);
       if (events.length === 0) {
-        throw new StateIntegrityError(`Run "${runId}" has no event history.`);
+        throw new StateIntegrityError('Run "' + runId + '" has no event history.');
       }
       if (snapshot.snapshot_sequence > events.length) {
         throw new StateIntegrityError(
-          `Run "${runId}" snapshot sequence exceeds the event log length.`,
+          'Run "' + runId + '" snapshot sequence exceeds the event log length.',
         );
       }
       if (snapshot.last_event_sequence !== snapshot.snapshot_sequence) {
         throw new StateIntegrityError(
-          `Run "${runId}" snapshot sequence fields are inconsistent.`,
+          'Run "' + runId + '" snapshot sequence fields are inconsistent.',
         );
       }
 
@@ -220,6 +214,81 @@ export class FileStateStore {
     });
   }
 
+  /**
+   * Appends an event and publishes its matching snapshot under one per-run
+   * lock. A hard crash between these durable writes can still leave a pending
+   * event; callers must detect that state and require recovery.
+   */
+  async commitEventAndSnapshot(
+    runId: string,
+    event: WorkflowEvent,
+    snapshot: WorkflowRunSnapshot,
+  ): Promise<void> {
+    validateRunId(runId);
+    if (
+      event.schema_version !== 1 ||
+      snapshot.schema_version !== 1 ||
+      event.run_id !== runId ||
+      snapshot.id !== runId
+    ) {
+      throw new StateIntegrityError("Event and snapshot must target the same supported run.");
+    }
+    if (
+      snapshot.last_event_sequence !== event.sequence ||
+      snapshot.snapshot_sequence !== event.sequence
+    ) {
+      throw new StateIntegrityError("The new snapshot must incorporate the committed event.");
+    }
+
+    await this.withRunLock(runId, async () => {
+      const runDirectory = this.runDirectory(runId);
+      const events = await this.readEventsUnlocked(runId);
+      const lastSequence = events.at(-1)?.sequence ?? 0;
+      const expected = lastSequence + 1;
+
+      if (event.sequence !== expected) {
+        throw new EventSequenceError(runId, expected, event.sequence);
+      }
+
+      let currentSnapshot: WorkflowRunSnapshot;
+      try {
+        currentSnapshot = JSON.parse(
+          await readFile(join(runDirectory, "run.json"), "utf8"),
+        ) as WorkflowRunSnapshot;
+      } catch (error) {
+        if (errorCode(error) === "ENOENT") throw new RunNotFoundError(runId);
+        throw new StateIntegrityError('Unable to read snapshot for run "' + runId + '".', { cause: error });
+      }
+
+      if (
+        currentSnapshot.id !== runId ||
+        currentSnapshot.last_event_sequence !== lastSequence ||
+        currentSnapshot.snapshot_sequence !== lastSequence
+      ) {
+        throw new StateIntegrityError(
+          'Run "' + runId + '" has unincorporated events; recovery is required before writing.',
+        );
+      }
+
+      if (events.some((existing) => existing.event_id === event.event_id)) {
+        throw new StateIntegrityError('Duplicate event id "' + event.event_id + '".');
+      }
+
+      const eventHandle = await open(join(runDirectory, "events.jsonl"), "a", 0o600);
+      try {
+        await eventHandle.writeFile(JSON.stringify(event) + "\n", "utf8");
+        await eventHandle.sync();
+      } finally {
+        await eventHandle.close();
+      }
+
+      await atomicWriteFile(
+        join(runDirectory, "run.json"),
+        JSON.stringify(snapshot, null, 2) + "\n",
+      );
+    });
+  }
+
   async writeSnapshot(snapshot: WorkflowRunSnapshot): Promise<void> {
     validateRunId(snapshot.id);
     if (snapshot.schema_version !== 1) {
@@ -236,7 +305,7 @@ export class FileStateStore {
         snapshot.snapshot_sequence !== lastSequence
       ) {
         throw new StateIntegrityError(
-          `Snapshot for run "${snapshot.id}" must incorporate the latest event sequence (${lastSequence}).`,
+          'Snapshot for run "' + snapshot.id + '" must incorporate the latest event sequence (' + lastSequence + ').',
         );
       }
 
@@ -276,7 +345,7 @@ export class FileStateStore {
         event = JSON.parse(line) as WorkflowEvent;
       } catch (error) {
         throw new StateIntegrityError(
-          `Run "${runId}" has invalid event JSON on line ${index + 1}.`,
+          'Run "' + runId + '" has invalid event JSON on line ' + (index + 1) + '.',
           { cause: error },
         );
       }
@@ -289,7 +358,7 @@ export class FileStateStore {
         seenIds.has(event.event_id)
       ) {
         throw new StateIntegrityError(
-          `Run "${runId}" event log is inconsistent on line ${index + 1}.`,
+          'Run "' + runId + '" event log is inconsistent on line ' + (index + 1) + '.',
         );
       }
 
@@ -305,7 +374,7 @@ export class FileStateStore {
     operation: () => Promise<T>,
   ): Promise<T> {
     await mkdir(this.runsDirectory, { recursive: true });
-    const lockPath = join(this.runsDirectory, `${runId}.lock`);
+    const lockPath = join(this.runsDirectory, runId + ".lock");
     let lockHandle;
 
     try {

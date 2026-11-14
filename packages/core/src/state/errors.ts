@@ -1,20 +1,20 @@
 export class RunLockedError extends Error {
   constructor(readonly runId: string) {
-    super(`Run "${runId}" is locked by another Aether process.`);
+    super('Run "' + runId + '" is locked by another Aether process.');
     this.name = "RunLockedError";
   }
 }
 
 export class RunNotFoundError extends Error {
   constructor(readonly runId: string) {
-    super(`Run "${runId}" does not exist.`);
+    super('Run "' + runId + '" does not exist.');
     this.name = "RunNotFoundError";
   }
 }
 
 export class RunAlreadyExistsError extends Error {
   constructor(readonly runId: string) {
-    super(`Run "${runId}" already exists.`);
+    super('Run "' + runId + '" already exists.');
     this.name = "RunAlreadyExistsError";
   }
 }
@@ -32,9 +32,7 @@ export class EventSequenceError extends Error {
     readonly expected: number,
     readonly actual: number,
   ) {
-    super(
-      `Invalid event sequence for run "${runId}": expected ${expected}, received ${actual}.`,
-    );
+    super('Invalid event sequence for run "' + runId + '": expected ' + expected + ', received ' + actual + '.');
     this.name = "EventSequenceError";
   }
 }
@@ -45,9 +43,7 @@ export class InvalidStageTransitionError extends Error {
     readonly from: string,
     readonly to: string,
   ) {
-    super(
-      `Stage "${stageId}" cannot transition from "${from}" to "${to}".`,
-    );
+    super('Stage "' + stageId + '" cannot transition from "' + from + '" to "' + to + '".');
     this.name = "InvalidStageTransitionError";
   }
 }
@@ -58,9 +54,7 @@ export class InvalidStageEventSequenceError extends Error {
     readonly previousSequence: number,
     readonly actualSequence: number,
   ) {
-    super(
-      `Stage "${stageId}" event sequence must be greater than ${previousSequence}; received ${actualSequence}.`,
-    );
+    super('Stage "' + stageId + '" event sequence must be greater than ' + previousSequence + '; received ' + actualSequence + '.');
     this.name = "InvalidStageEventSequenceError";
   }
 }

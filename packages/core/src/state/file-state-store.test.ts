@@ -47,7 +47,7 @@ function createEvent(
 ): WorkflowEvent {
   return {
     schema_version: 1,
-    event_id: `event_${sequence}`,
+    event_id: "event_" + sequence,
     run_id: "run_test_001",
     sequence,
     type,
@@ -140,5 +140,38 @@ describe("FileStateStore", () => {
     const contents = await readFile(logPath, "utf8");
     expect(contents.endsWith("\n")).toBe(true);
     expect(contents.trim().split("\n")).toHaveLength(1);
+  });
+
+  it("commits an event and its matching snapshot under one run lock", async () => {
+    await store.initializeRun(createSnapshot(), createEvent(1));
+    const next = createSnapshot();
+    next.status = "running";
+    next.last_event_sequence = 2;
+    next.snapshot_sequence = 2;
+
+    await store.commitEventAndSnapshot(
+      "run_test_001",
+      createEvent(2, "run.started"),
+      next,
+    );
+
+    const loaded = await store.loadRun("run_test_001");
+    expect(loaded.snapshot.status).toBe("running");
+    expect(loaded.pendingEvents).toEqual([]);
+    expect((await store.readEvents("run_test_001")).map((event) => event.sequence))
+      .toEqual([1, 2]);
+  });
+
+  it("rejects a snapshot that does not incorporate the new event", async () => {
+    await store.initializeRun(createSnapshot(), createEvent(1));
+    const next = createSnapshot();
+
+    await expect(
+      store.commitEventAndSnapshot(
+        "run_test_001",
+        createEvent(2, "run.started"),
+        next,
+      ),
+    ).rejects.toBeInstanceOf(StateIntegrityError);
   });
 });
