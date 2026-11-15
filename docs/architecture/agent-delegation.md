@@ -27,6 +27,7 @@ The task output directory is separate from source write scope:
 .aether/handoffs/<run-id>/<stage-id>/
 ├── task.json
 ├── HANDOFF.md
+├── CONTEXT.md
 ├── result.json
 └── output/
     └── evidence files
@@ -59,6 +60,8 @@ aether workflow accept <run-id> \
   --stage discovery \
   --result .aether/handoffs/<run-id>/discovery/result.json
 ```
+
+Before a handoff or interactive launch, the CLI also retrieves bounded, relevance-ranked local project excerpts into `CONTEXT.md`; the handoff tells the agent to inspect the referenced source files. This context is informational and is not counted as verification evidence.
 
 Acceptance writes a verification manifest to `.aether/verification/<run-id>/<stage-id>.json`.
 
