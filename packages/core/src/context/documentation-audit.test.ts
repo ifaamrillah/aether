@@ -81,6 +81,19 @@ describe("auditProjectDocumentation", () => {
     expect(result.brokenLinks).toHaveLength(0);
   });
 
+  it("checks self-referential heading anchors in nested documents", async () => {
+    await writeProjectFile(
+      "docs/guide.md",
+      "# Guide\n\n[valid](#guide)\n[invalid](#missing)\n",
+    );
+
+    const result = await auditProjectDocumentation({ projectRoot: root });
+
+    expect(result.linksChecked).toBe(2);
+    expect(result.brokenLinks.map((link) => link.href)).toEqual(["#missing"]);
+    expect(result.brokenLinks[0]?.targetPath).toBe("docs/guide.md");
+  });
+
   it("reports links that escape the project root", async () => {
     await writeProjectFile("README.md", "[escape](../../outside.md)\n");
 
