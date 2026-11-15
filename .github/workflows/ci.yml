@@ -122,7 +122,9 @@ jobs:
           export PATH="$fake_agent_dir:$PATH"
           export AETHER_TEST_TASK_PATH="$GITHUB_WORKSPACE/.aether/handoffs/$run_id/discovery/task.json"
           node apps/cli/dist/index.js workflow launch "$run_id" --file workflows/feature.yaml --adapter codex --stage discovery
-          test -f ".aether/handoffs/$run_id/discovery/HANDOFF.md"
+          test -s ".aether/handoffs/$run_id/discovery/HANDOFF.md"
+          test -s ".aether/handoffs/$run_id/discovery/CONTEXT.md"
+          grep -q 'CONTEXT.md' ".aether/handoffs/$run_id/discovery/HANDOFF.md"
           test -f ".aether/handoffs/$run_id/discovery/result.json"
           node apps/cli/dist/index.js workflow accept "$run_id" --file workflows/feature.yaml --stage discovery --result ".aether/handoffs/$run_id/discovery/result.json"
           node apps/cli/dist/index.js workflow status "$run_id"

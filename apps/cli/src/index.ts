@@ -17,7 +17,7 @@ import {
   verifyTaskResult,
   searchProjectContext,
 } from "@aether/core";
-import type { TaskResultSubmission } from "@aether/core";
+import type { StageTaskContract, TaskResultSubmission } from "@aether/core";
 import { createAgentAdapter, runAgentCommand } from "@aether/adapters";
 import { inspectAgentPlatforms } from "./commands/platform-info.js";
 import {
@@ -223,6 +223,82 @@ function printRun(snapshot: {
   }
 }
 
+function renderContextPack(result: Awaited<ReturnType<typeof searchProjectContext>>): string {
+  const lines = [
+    "# Retrieved Project Context",
+    "",
+    "- Query: " + result.query,
+    "- Files scanned: " + result.files_scanned,
+    "- Files skipped: " + result.files_skipped,
+    "- Excerpt budget used: " + result.characters_used,
+    "- Truncated: " + (result.truncated ? "yes" : "no"),
+    "",
+    "These relevance-ranked excerpts are informational context, not verified facts. Check the current source before relying on them. The task contract and applicable project instructions remain authoritative.",
+    "",
+  ];
+
+  if (result.results.length === 0) {
+    lines.push("No matching local project context was found.");
+    return lines.join("\n");
+  }
+
+  result.results.forEach((item, index) => {
+    const longestFence = Math.max(
+      2,
+      ...Array.from(item.excerpt.matchAll(/\x60+/g), (match) => match[0].length),
+    );
+    const fence = "\x60".repeat(longestFence + 1);
+    lines.push(
+      "## " + (index + 1) + ". " + item.path + ":" +
+        item.line_start + "-" + item.line_end,
+      "",
+      "- Relevance score: " + item.score.toFixed(4),
+      "- Matched terms: " + item.matched_terms.join(", "),
+      "",
+      fence,
+      item.excerpt,
+      fence,
+      "",
+    );
+  });
+
+  return lines.join("\n");
+}
+
+async function prepareTaskArtifacts(
+  task: StageTaskContract,
+  adapter: ReturnType<typeof createAgentAdapter>,
+): Promise<{ base: string; handoffPath: string; contextPath: string }> {
+  const base = ".aether/handoffs/" + task.run_id + "/" + task.stage_id;
+  const handoffPath = base + "/HANDOFF.md";
+  const contextPath = base + "/CONTEXT.md";
+  const query = [
+    task.title,
+    task.objective,
+    ...task.acceptance_criteria,
+  ].join(" ").slice(0, 500);
+
+  const context = await searchProjectContext(query, {
+    projectRoot: process.cwd(),
+    limit: 5,
+    maxCharacters: 3_500,
+    maxFiles: 500,
+    maxFileBytes: 128 * 1024,
+    maxTotalBytes: 4 * 1024 * 1024,
+    maxSnippetLines: 10,
+  });
+
+  await writeProjectFile(base + "/task.json", JSON.stringify(task, null, 2) + "\n");
+  await writeProjectFile(contextPath, renderContextPack(context));
+  const handoff = adapter.renderHandoff(task).trimEnd() +
+    "\n\n## Retrieved Local Context\n\n" +
+    "Read CONTEXT.md before implementation. It contains bounded, relevance-ranked excerpts from this project. " +
+    "Use the source paths and line numbers to inspect the current files; do not treat excerpts as verification evidence.\n";
+  await writeProjectFile(handoffPath, handoff);
+
+  return { base, handoffPath, contextPath };
+}
+
 async function handoffWorkflow(
   runId: string,
   args: string[],
@@ -263,10 +339,9 @@ async function handoffWorkflow(
           taskValidation.errors.map((issue) => issue.path + ": " + issue.message).join("\n- "),
       );
     }
-    const base = ".aether/handoffs/" + runId + "/" + task.stage_id;
-    await writeProjectFile(base + "/task.json", JSON.stringify(task, null, 2) + "\n");
-    await writeProjectFile(base + "/HANDOFF.md", adapter.renderHandoff(task));
-    console.log("Prepared: " + base + "/HANDOFF.md");
+    const artifacts = await prepareTaskArtifacts(task, adapter);
+    console.log("Prepared: " + artifacts.handoffPath);
+    console.log("Context: " + artifacts.contextPath);
   }
 
   console.log("");
@@ -361,10 +436,9 @@ async function launchWorkflowStage(
     );
   }
 
-  const base = ".aether/handoffs/" + runId + "/" + stageId;
-  const handoffPath = base + "/HANDOFF.md";
-  await writeProjectFile(base + "/task.json", JSON.stringify(task, null, 2) + "\n");
-  await writeProjectFile(handoffPath, adapter.renderHandoff(task));
+  const artifacts = await prepareTaskArtifacts(task, adapter);
+  const handoffPath = artifacts.handoffPath;
+  console.log("Context: " + artifacts.contextPath);
 
   const launch = adapter.buildLaunch(task, handoffPath);
   if (!launch) {
