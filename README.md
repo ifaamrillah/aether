@@ -133,6 +133,15 @@ node apps/cli/dist/index.js context search "workflow recovery" --limit 5 --max-c
 
 Context search uses deterministic lexical ranking over local text files. It does not create a persistent index, use embeddings, or send project content to a remote service. Common generated directories, binary files, symbolic links, obvious environment/credential files, and oversized content are excluded. The retriever applies root and nested `.gitignore` rules, including common glob, anchored-path, and negation patterns. Hard-coded safety exclusions for environment/credential files, `.aether`, and dependency/cache directories remain excluded even when a negation rule attempts to re-include them. This is still not a secret scanner; review repository and local ignore rules before using it on projects with private local data.
 
+Check local Markdown links and heading references:
+
+```bash
+node apps/cli/dist/index.js docs audit
+node apps/cli/dist/index.js docs audit --project ../service --max-files 3000
+```
+
+The documentation audit checks relative and project-root Markdown destinations, extensionless Markdown routes, and common heading anchors. It skips external URLs and code examples. A non-zero exit indicates a missing local target, missing heading anchor, or an incomplete scan. It does not fetch remote URLs or assess whether documentation statements are semantically correct.
+
 The adapter registry also declares each host's skill discovery directory. Current defaults are:
 
 | Adapter | Skill directory |
