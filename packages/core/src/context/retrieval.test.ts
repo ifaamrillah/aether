@@ -110,6 +110,7 @@ describe("searchProjectContext", () => {
         "\\#literal.md",
       ].join("\n"),
     );
+    await writeProjectFile("safe.md", "gitignoremarker safe file stays included\n");
     await writeProjectFile("skip.generated.md", "gitignoremarker should be excluded\n");
     await writeProjectFile("keep.generated.md", "gitignoremarker should be included\n");
     await writeProjectFile("root-only.md", "gitignoremarker root anchored file\n");
@@ -132,8 +133,9 @@ describe("searchProjectContext", () => {
 
     expect(paths.has("keep.generated.md")).toBe(true);
     expect(paths.has("nested/root-only.md")).toBe(true);
-    expect(paths.has("!literal.md")).toBe(true);
-    expect(paths.has("#literal.md")).toBe(true);
+    expect(paths.has("safe.md")).toBe(true);
+    expect(paths.has("!literal.md")).toBe(false);
+    expect(paths.has("#literal.md")).toBe(false);
     expect(paths.has("src/important.test.ts")).toBe(true);
     expect(paths.has("src/foo/visible.md")).toBe(true);
     expect(paths.has("skip.generated.md")).toBe(false);
