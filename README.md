@@ -90,8 +90,8 @@ Launch one stage through a supported interactive agent CLI:
 
 ```bash
 node apps/cli/dist/index.js workflow launch <run-id> \
-  --file workflows/aether/feature.yaml \\
-  --adapter codex \\
+  --file workflows/aether/feature.yaml \
+  --adapter codex \
   --stage discovery
 ```
 
