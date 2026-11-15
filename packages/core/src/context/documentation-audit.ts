@@ -1,4 +1,4 @@
-import { extname, relative, resolve, sep } from "node:path";
+import { dirname, extname, relative, resolve, sep } from "node:path";
 import { realpath, stat } from "node:fs/promises";
 import {
   collectProjectMarkdownFiles,
@@ -85,19 +85,59 @@ function parseMarkdownDestination(value: string): string {
   return trimmed;
 }
 
+function maskMarkdownCode(content: string): string {
+  const masked = content.split("");
+  const maskRange = (start: number, end: number): void => {
+    for (let index = start; index < end; index += 1) {
+      if (masked[index] !== "\n" && masked[index] !== "\r") masked[index] = " ";
+    }
+  };
+
+  let offset = 0;
+  let fenceCharacter: string | undefined;
+  let fenceLength = 0;
+  for (const line of content.split("\n")) {
+    const fence = line.match(/^\s{0,3}(`{3,}|~{3,})/);
+    if (fence) {
+      const character = fence[1]![0]!;
+      const length = fence[1]!.length;
+      maskRange(offset, offset + line.length);
+      if (fenceCharacter === undefined) {
+        fenceCharacter = character;
+        fenceLength = length;
+      } else if (character === fenceCharacter && length >= fenceLength) {
+        fenceCharacter = undefined;
+        fenceLength = 0;
+      }
+    } else if (fenceCharacter !== undefined) {
+      maskRange(offset, offset + line.length);
+    }
+    offset += line.length + 1;
+  }
+
+  const withoutFences = masked.join("");
+  const inlineCode = /`+[sS]*?`+/g;
+  let match: RegExpExecArray | null;
+  while ((match = inlineCode.exec(withoutFences)) !== null) {
+    maskRange(match.index, match.index + match[0].length);
+  }
+  return masked.join("");
+}
+
 function extractMarkdownLinks(content: string): MarkdownLink[] {
   const links: MarkdownLink[] = [];
+  const visible = maskMarkdownCode(content);
   const inlinePattern = /!?\[[^\]]*\]\(/g;
   let match: RegExpExecArray | null;
 
-  while ((match = inlinePattern.exec(content)) !== null) {
+  while ((match = inlinePattern.exec(visible)) !== null) {
     const destinationStart = inlinePattern.lastIndex;
     let depth = 1;
     let escaped = false;
     let closingIndex = -1;
 
-    for (let index = destinationStart; index < content.length; index += 1) {
-      const character = content[index]!;
+    for (let index = destinationStart; index < visible.length; index += 1) {
+      const character = visible[index]!;
       if (escaped) {
         escaped = false;
         continue;
@@ -126,7 +166,7 @@ function extractMarkdownLinks(content: string): MarkdownLink[] {
   }
 
   const definitionPattern = /^[ \t]{0,3}\[[^\]]+\]:[ \t]*(<[^>]+>|(?:\\.|[^\s]+))/gm;
-  while ((match = definitionPattern.exec(content)) !== null) {
+  while ((match = definitionPattern.exec(visible)) !== null) {
     const href = parseMarkdownDestination(match[1] ?? "");
     if (href.length > 0) {
       links.push({ href, line: lineNumberAt(content, match.index) });
@@ -223,7 +263,7 @@ async function resolveLocalTarget(
   const sourceAbsolute = resolve(root, ...sourcePath.split("/"));
   const basePath = decodedPath.startsWith("/")
     ? resolve(root, decodedPath.slice(1))
-    : resolve(root, ...relative(root, sourceAbsolute).split("/").slice(0, -1), decodedPath);
+    : resolve(dirname(sourceAbsolute), decodedPath);
 
   if (!isWithinRoot(root, basePath)) {
     return { reason: "link resolves outside the project root" };
