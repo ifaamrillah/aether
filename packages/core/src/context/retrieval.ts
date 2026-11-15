@@ -184,7 +184,17 @@ async function collectDocuments(
       : root;
     let entries;
     try {
-      entries = await readdir(absoluteDirectory, { withFileTypes: true });
+      const directoryDetails = await lstat(absoluteDirectory);
+      if (!directoryDetails.isDirectory() || directoryDetails.isSymbolicLink()) {
+        filesSkipped += 1;
+        return;
+      }
+      const realDirectory = await realpath(absoluteDirectory);
+      if (!isWithinRoot(root, realDirectory)) {
+        filesSkipped += 1;
+        return;
+      }
+      entries = await readdir(realDirectory, { withFileTypes: true });
     } catch {
       filesSkipped += 1;
       return;
@@ -463,7 +473,12 @@ export async function searchProjectContext(
       candidate.snippet_start,
       maxSnippetLines,
     );
-    const headerCost = candidate.document.path.length + 48;
+    const resultNumber = results.length + 1;
+    const header = "[" + resultNumber + "] " + candidate.document.path + ":" +
+      (excerpt.start + 1) + "-" + excerpt.end +
+      " (score " + candidate.score.toFixed(2) + ")";
+    const matchedHeader = "Matched: " + candidate.matched_terms.join(", ");
+    const headerCost = header.length + matchedHeader.length + 3;
     const remaining = maxCharacters - charactersUsed - headerCost;
     if (remaining <= 0) {
       truncated = true;
@@ -483,7 +498,7 @@ export async function searchProjectContext(
     results.push({
       path: candidate.document.path,
       line_start: excerpt.start + 1,
-      line_end: excerpt.end,
+      line_end: excerpt.start + text.split("\n").length,
       score: Number(candidate.score.toFixed(4)),
       matched_terms: candidate.matched_terms,
       excerpt: text,
