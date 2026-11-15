@@ -125,6 +125,14 @@ aether platform detect
 
 The capability report explicitly shows unsupported features such as native subagent invocation and parallel dispatch.
 
+Retrieve bounded local project context for a task:
+
+```bash
+node apps/cli/dist/index.js context search "workflow recovery" --limit 5 --max-chars 6000
+```
+
+Context search uses deterministic lexical ranking over local text files. It does not create a persistent index, use embeddings, or send project content to a remote service. Common generated directories, binary files, symbolic links, obvious environment/credential files, and oversized content are excluded. This initial version does not yet interpret every custom `.gitignore` pattern or replace secret scanning; review repository ignore rules before using it on projects with private local files.
+
 The adapter registry also declares each host's skill discovery directory. Current defaults are:
 
 | Adapter | Skill directory |
@@ -149,7 +157,7 @@ See docs/guides/ui-improvement-workflow.md.
 ## Repository layout
 
 - `apps/cli`: developer interface
-- `packages/core`: workflow planning, file-backed run state, delegation contracts, and evidence verification
+- `packages/core`: workflow planning, file-backed run state, local context retrieval, delegation contracts, and evidence verification
 - `packages/adapters`: portable handoff adapters for generic agents, Claude Code, Codex, OpenCode, Gemini CLI, and Antigravity
 - `packages/schemas`: canonical JSON Schema contracts and structural validation
 - `skills`: portable Agent Skills, validated by `aether skill validate`
