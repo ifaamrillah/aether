@@ -287,9 +287,11 @@ async function resolveLocalTarget(
   }
 
   const sourceAbsolute = resolve(root, ...sourcePath.split("/"));
-  const basePath = decodedPath.startsWith("/")
-    ? resolve(root, decodedPath.slice(1))
-    : resolve(dirname(sourceAbsolute), decodedPath);
+  const basePath = decodedPath.length === 0
+    ? sourceAbsolute
+    : decodedPath.startsWith("/")
+      ? resolve(root, decodedPath.slice(1))
+      : resolve(dirname(sourceAbsolute), decodedPath);
 
   if (!isWithinRoot(root, basePath)) {
     return { reason: "link resolves outside the project root" };
