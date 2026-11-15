@@ -82,9 +82,18 @@ const schemaNames: ContractSchemaName[] = [
   "trusted-approvers",
 ];
 
+const loadedSchemas = new Map<ContractSchemaName, object>();
+for (const name of schemaNames) {
+  const schema = loadSchema(name);
+  ajv.addSchema(schema);
+  loadedSchemas.set(name, schema);
+}
+
 const validators = new Map<ContractSchemaName, CompiledValidator>();
 for (const name of schemaNames) {
-  validators.set(name, ajv.compile(loadSchema(name)));
+  const schema = loadedSchemas.get(name);
+  if (!schema) throw new Error('Unable to load canonical schema "' + name + '".');
+  validators.set(name, ajv.compile(schema));
 }
 
 export function validateAetherContract(
