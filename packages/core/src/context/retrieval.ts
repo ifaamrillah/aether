@@ -220,20 +220,37 @@ function compileGitIgnoreGlob(pattern: string, anchored: boolean): RegExp {
   return new RegExp(prefix + source + "(?:/.*)?$");
 }
 
+function trimGitIgnoreTrailingSpaces(value: string): string {
+  let line = value;
+  while (line.endsWith(" ")) {
+    let backslashes = 0;
+    for (let index = line.length - 2; index >= 0 && line[index] === "\\"; index -= 1) {
+      backslashes += 1;
+    }
+    if (backslashes % 2 === 1) {
+      line = line.slice(0, -2) + " ";
+      break;
+    }
+    line = line.slice(0, -1);
+  }
+  return line;
+}
+
 function parseGitIgnoreRules(content: string, basePath: string): IgnoreRule[] {
   const rules: IgnoreRule[] = [];
   for (const rawLine of content.split(/\r?\n/)) {
-    let line = rawLine.replace(/\s+$/, "");
+    let line = trimGitIgnoreTrailingSpaces(rawLine);
     if (line.length === 0) continue;
 
-    if (line.startsWith("\\#") || line.startsWith("\\!")) {
+    const escapedLeadingCharacter = line.startsWith("\\#") || line.startsWith("\\!");
+    if (escapedLeadingCharacter) {
       line = line.slice(1);
     } else if (line.startsWith("#")) {
       continue;
     }
 
     let negated = false;
-    if (line.startsWith("!")) {
+    if (!escapedLeadingCharacter && line.startsWith("!")) {
       negated = true;
       line = line.slice(1);
     }
@@ -245,13 +262,13 @@ function parseGitIgnoreRules(content: string, basePath: string): IgnoreRule[] {
     if (directoryOnly) line = line.slice(0, -1);
     if (line.length === 0) continue;
 
+    const hasSlash = line.includes("/");
     const endsWithDirectoryGlob = line.endsWith("/**");
     if (endsWithDirectoryGlob) {
       line = line.slice(0, -3);
       if (line.length === 0) line = "**";
     }
 
-    const hasSlash = line.includes("/");
     rules.push({
       base_path: basePath,
       pattern: compileGitIgnoreGlob(line, anchored || hasSlash),
