@@ -15,6 +15,7 @@ import {
   getAetherVersion,
   planReadyStageTasks,
   verifyTaskResult,
+  searchProjectContext,
 } from "@aether/core";
 import type { TaskResultSubmission } from "@aether/core";
 import { createAgentAdapter, runAgentCommand } from "@aether/adapters";
@@ -56,6 +57,8 @@ Commands:
   workflow validate <file>                    Validate workflow YAML and show execution waves
   workflow list [directory]                   List validated workflows (default: workflows/aether)
   skill validate [path]                        Validate portable Agent Skills (default: skills/)
+  context search <query> [--limit <n>] [--max-chars <n>] [--project <path>]
+                                               Retrieve bounded local project context
   platform list                                List adapter capabilities and skill paths
   platform detect [--project <path>]           Detect platform markers in a project
   workflow run <file> [--input name=value]     Create and start a workflow run
@@ -664,6 +667,74 @@ async function runWorkflowCommand(args: string[]): Promise<number> {
   return 2;
 }
 
+function parsePositiveIntegerOption(
+  value: string | undefined,
+  label: string,
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value)) {
+    throw new Error(label + " must be a positive integer.");
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(label + " must be a positive integer.");
+  }
+  return parsed;
+}
+
+async function runContextCommand(args: string[]): Promise<number> {
+  const [subcommand, ...values] = args;
+  if (subcommand !== "search") {
+    throw new Error("Usage: aether context search <query> [--limit <n>] [--max-chars <n>] [--project <path>]");
+  }
+
+  const firstOptionIndex = values.findIndex((value) => value.startsWith("--"));
+  const queryParts = firstOptionIndex < 0 ? values : values.slice(0, firstOptionIndex);
+  const optionArgs = firstOptionIndex < 0 ? [] : values.slice(firstOptionIndex);
+  const query = queryParts.join(" ").trim();
+  if (!query) {
+    throw new Error("Usage: aether context search <query> [--limit <n>] [--max-chars <n>] [--project <path>]");
+  }
+
+  const options = parseOptions(optionArgs, ["--limit", "--max-chars", "--project"]);
+  const projectRoot = resolve(options["--project"] ?? process.cwd());
+  const limit = parsePositiveIntegerOption(options["--limit"], "--limit");
+  const maxCharacters = parsePositiveIntegerOption(options["--max-chars"], "--max-chars");
+  const result = await searchProjectContext(query, {
+    projectRoot,
+    ...(limit === undefined ? {} : { limit }),
+    ...(maxCharacters === undefined ? {} : { maxCharacters }),
+  });
+
+  console.log("Project context search: " + result.query);
+  console.log(
+    "Scanned " + result.files_scanned + " text file(s); skipped " +
+      result.files_skipped + "; budget used " + result.characters_used + " character(s)." +
+      (result.truncated ? " Results are truncated." : ""),
+  );
+  if (result.results.length === 0) {
+    console.log("No matching project context found.");
+    return 0;
+  }
+
+  result.results.forEach((item, index) => {
+    console.log("");
+    console.log(
+      "[" + (index + 1) + "] " + item.path + ":" +
+        item.line_start + "-" + item.line_end +
+        " (score " + item.score.toFixed(2) + ")",
+    );
+    console.log("Matched: " + item.matched_terms.join(", "));
+    console.log(item.excerpt);
+  });
+
+  if (result.truncated) {
+    console.log("");
+    console.log("Increase --limit or --max-chars to retrieve more context.");
+  }
+  return 0;
+}
+
 async function runPlatformCommand(args: string[]): Promise<number> {
   const [subcommand, ...options] = args;
 
@@ -985,6 +1056,15 @@ async function main(args: string[]): Promise<number> {
       return await runSkillCommand(rest);
     } catch (error) {
       console.error(error instanceof Error ? error.message : "Skill command failed.");
+      return 1;
+    }
+  }
+
+  if (command === "context") {
+    try {
+      return await runContextCommand(rest);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Context search failed.");
       return 1;
     }
   }

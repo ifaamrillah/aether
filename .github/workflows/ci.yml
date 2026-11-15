@@ -60,6 +60,13 @@ jobs:
       - run: node apps/cli/dist/index.js skill validate skills
       - run: node apps/cli/dist/index.js platform list
       - run: node apps/cli/dist/index.js platform detect --project .
+      - name: Smoke test local context retrieval
+        shell: bash
+        run: |
+          output="$(node apps/cli/dist/index.js context search 'workflow recovery' --limit 5 --max-chars 6000)"
+          echo "$output"
+          printf '%s\n' "$output" | grep -q 'docs/architecture/workflow-recovery.md'
+
       - name: Smoke test project initialization and doctor
         shell: bash
         run: |

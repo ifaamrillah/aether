@@ -10,4 +10,6 @@ export type Result<T, E = Error> =
 
 export * from "./workflow/index.js";
 
+export * from "./context/index.js";
+
 export * from "./state/index.js";

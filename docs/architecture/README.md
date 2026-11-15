@@ -6,7 +6,7 @@ Aether is a modular, local-first AI Engineering Harness.
 
 1. Developer interface: CLI, skills, workflow entrypoints.
 2. Control plane: workflow resolver/engine, state, policy, artifact, task, and context services.
-3. Knowledge plane: codebase understanding, retrieval, living documentation, and drift detection.
+3. Knowledge plane: codebase understanding, retrieval, living documentation, and drift detection. The first retrieval primitive is bounded local lexical search; semantic retrieval and documentation drift automation are future work.
 4. Execution plane: platform-native agent delegation, scripts, tests, and verification.
 5. Adapters: translate platform capabilities and installation conventions into portable Aether contracts.
 
