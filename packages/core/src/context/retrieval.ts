@@ -156,6 +156,153 @@ function validatePositiveInteger(
   return selected;
 }
 
+interface IgnoreRule {
+  base_path: string;
+  pattern: RegExp;
+  negated: boolean;
+  directory_only: boolean;
+}
+
+function escapeRegexCharacter(character: string): string {
+  return /[|\\{}()[\]^$+?.]/.test(character) ? "\\" + character : character;
+}
+
+function compileGitIgnoreGlob(pattern: string, anchored: boolean): RegExp {
+  let source = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index]!;
+    if (character === "\\") {
+      const next = pattern[index + 1];
+      if (next !== undefined) {
+        source += escapeRegexCharacter(next);
+        index += 1;
+      } else {
+        source += "\\\\";
+      }
+      continue;
+    }
+    if (character === "*") {
+      if (pattern[index + 1] === "*") {
+        while (pattern[index + 1] === "*") index += 1;
+        if (pattern[index + 1] === "/") {
+          source += "(?:.*/)?";
+          index += 1;
+        } else {
+          source += ".*";
+        }
+      } else {
+        source += "[^/]*";
+      }
+      continue;
+    }
+    if (character === "?") {
+      source += "[^/]";
+      continue;
+    }
+    if (character === "[") {
+      const closing = pattern.indexOf("]", index + 1);
+      if (closing > index + 1) {
+        let characterClass = pattern.slice(index + 1, closing);
+        if (characterClass.startsWith("!")) {
+          characterClass = "^" + characterClass.slice(1);
+        }
+        source += "[" + characterClass + "]";
+        index = closing;
+      } else {
+        source += "\\[";
+      }
+      continue;
+    }
+    source += escapeRegexCharacter(character);
+  }
+
+  const prefix = anchored ? "^" : "(?:^|/)";
+  return new RegExp(prefix + source + "(?:/.*)?$");
+}
+
+function parseGitIgnoreRules(content: string, basePath: string): IgnoreRule[] {
+  const rules: IgnoreRule[] = [];
+  for (const rawLine of content.split(/\r?\n/)) {
+    let line = rawLine.replace(/\s+$/, "");
+    if (line.length === 0) continue;
+
+    if (line.startsWith("\\#") || line.startsWith("\\!")) {
+      line = line.slice(1);
+    } else if (line.startsWith("#")) {
+      continue;
+    }
+
+    let negated = false;
+    if (line.startsWith("!")) {
+      negated = true;
+      line = line.slice(1);
+    }
+    if (line.length === 0) continue;
+
+    const anchored = line.startsWith("/");
+    if (anchored) line = line.slice(1);
+    const directoryOnly = line.endsWith("/");
+    if (directoryOnly) line = line.slice(0, -1);
+    if (line.length === 0) continue;
+
+    const endsWithDirectoryGlob = line.endsWith("/**");
+    if (endsWithDirectoryGlob) {
+      line = line.slice(0, -3);
+      if (line.length === 0) line = "**";
+    }
+
+    const hasSlash = line.includes("/");
+    rules.push({
+      base_path: basePath,
+      pattern: compileGitIgnoreGlob(line, anchored || hasSlash),
+      negated,
+      directory_only: directoryOnly,
+    });
+  }
+  return rules;
+}
+
+async function readGitIgnoreRules(
+  absoluteDirectory: string,
+  relativeDirectory: string,
+  maxFileBytes: number,
+): Promise<IgnoreRule[]> {
+  const ignorePath = resolve(absoluteDirectory, ".gitignore");
+  try {
+    const details = await lstat(ignorePath);
+    if (!details.isFile() || details.isSymbolicLink() || details.size > maxFileBytes) {
+      return [];
+    }
+    const buffer = await readFile(ignorePath);
+    if (buffer.byteLength > maxFileBytes || buffer.includes(0)) return [];
+    return parseGitIgnoreRules(buffer.toString("utf8"), relativeDirectory);
+  } catch {
+    return [];
+  }
+}
+
+function pathIsIgnored(
+  relativePath: string,
+  isDirectory: boolean,
+  rules: IgnoreRule[],
+): boolean {
+  let ignored = false;
+  for (const rule of rules) {
+    if (rule.directory_only && !isDirectory) continue;
+
+    let candidate = relativePath;
+    if (rule.base_path.length > 0) {
+      const prefix = rule.base_path + "/";
+      if (!candidate.startsWith(prefix)) continue;
+      candidate = candidate.slice(prefix.length);
+    }
+    if (rule.pattern.test(candidate)) {
+      ignored = !rule.negated;
+    }
+  }
+  return ignored;
+}
+
 async function collectDocuments(
   root: string,
   options: {
@@ -173,7 +320,7 @@ async function collectDocuments(
   let totalBytes = 0;
   let truncated = false;
 
-  async function visit(relativeDirectory: string): Promise<void> {
+  async function visit(relativeDirectory: string, inheritedRules: IgnoreRule[]): Promise<void> {
     if (documents.length >= options.maxFiles || totalBytes >= options.maxTotalBytes) {
       truncated = true;
       return;
@@ -201,6 +348,12 @@ async function collectDocuments(
     }
 
     entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
+    const localRules = await readGitIgnoreRules(
+      absoluteDirectory,
+      relativeDirectory,
+      options.maxFileBytes,
+    );
+    const rules = [...inheritedRules, ...localRules];
 
     for (const entry of entries) {
       if (documents.length >= options.maxFiles || totalBytes >= options.maxTotalBytes) {
@@ -225,11 +378,19 @@ async function collectDocuments(
         ) {
           continue;
         }
-        await visit(relativePath);
+        if (pathIsIgnored(relativePath, true, rules)) {
+          filesSkipped += 1;
+          continue;
+        }
+        await visit(relativePath, rules);
         continue;
       }
 
       if (!entry.isFile() || !isCandidateTextFile(entry.name)) {
+        continue;
+      }
+      if (pathIsIgnored(relativePath, false, rules)) {
+        filesSkipped += 1;
         continue;
       }
 
@@ -292,7 +453,7 @@ async function collectDocuments(
     }
   }
 
-  await visit("");
+  await visit("", []);
   return { documents, filesSkipped, truncated };
 }
 
