@@ -36,4 +36,4 @@ aether update
 
 Use `aether init --dry-run` to inspect the proposed installation without writing project files. To source a different workflow collection, pass `--workflows <directory>`; it is validated using the same rules.
 
-The current workflows create human-mediated handoffs for ready stages. They do not cause platform agents to launch automatically.
+The current workflows do not launch platform agents automatically. An operator may prepare handoffs for ready stages or explicitly launch one ready/failed stage with `aether workflow launch <run-id> --file <workflow-file> --adapter <id> --stage <stage-id>`. A prepared stage receives a task contract, a HANDOFF.md, and a bounded CONTEXT.md pack of locally retrieved source/documentation excerpts. Claude Code, Codex, Gemini CLI, and Antigravity support interactive launch; Generic and OpenCode remain handoff-only. Native subagent dispatch and parallel execution are not implemented.
