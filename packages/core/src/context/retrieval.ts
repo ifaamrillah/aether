@@ -326,6 +326,7 @@ async function collectDocuments(
     maxFiles: number;
     maxFileBytes: number;
     maxTotalBytes: number;
+    markdownOnly?: boolean;
   },
 ): Promise<{
   documents: SearchDocument[];
@@ -404,6 +405,12 @@ async function collectDocuments(
       }
 
       if (!entry.isFile() || !isCandidateTextFile(entry.name)) {
+        continue;
+      }
+      if (
+        options.markdownOnly &&
+        ![".md", ".mdx"].includes(extname(entry.name).toLowerCase())
+      ) {
         continue;
       }
       if (pathIsIgnored(relativePath, false, rules)) {
@@ -699,5 +706,84 @@ export async function searchProjectContext(
     truncated,
     characters_used: charactersUsed,
     results,
+  };
+}
+
+export interface ProjectMarkdownFile {
+  path: string;
+  content: string;
+}
+
+export interface ProjectMarkdownCollectionOptions {
+  projectRoot: string;
+  maxFiles?: number;
+  maxFileBytes?: number;
+  maxTotalBytes?: number;
+}
+
+export interface ProjectMarkdownCollection {
+  files: ProjectMarkdownFile[];
+  files_scanned: number;
+  files_skipped: number;
+  truncated: boolean;
+}
+
+/**
+ * Collects Markdown documents using the same bounded, symlink-safe,
+ * .gitignore-aware walker as project context retrieval.
+ */
+export async function collectProjectMarkdownFiles(
+  options: ProjectMarkdownCollectionOptions,
+): Promise<ProjectMarkdownCollection> {
+  const maxFiles = validatePositiveInteger(
+    options.maxFiles,
+    5_000,
+    "maxFiles",
+    10_000,
+  );
+  const maxFileBytes = validatePositiveInteger(
+    options.maxFileBytes,
+    512 * 1024,
+    "maxFileBytes",
+    10 * 1024 * 1024,
+  );
+  const maxTotalBytes = validatePositiveInteger(
+    options.maxTotalBytes,
+    32 * 1024 * 1024,
+    "maxTotalBytes",
+    256 * 1024 * 1024,
+  );
+
+  let root: string;
+  try {
+    root = await realpath(resolve(options.projectRoot));
+    const details = await stat(root);
+    if (!details.isDirectory()) {
+      throw new ProjectContextSearchError("Project root must be a directory.");
+    }
+  } catch (error) {
+    if (error instanceof ProjectContextSearchError) throw error;
+    throw new ProjectContextSearchError(
+      "Project root does not exist or cannot be read.",
+      { cause: error },
+    );
+  }
+
+  const collected = await collectDocuments(root, {
+    maxFiles,
+    maxFileBytes,
+    maxTotalBytes,
+    markdownOnly: true,
+  });
+  const files = collected.documents.map((document) => ({
+    path: document.path,
+    content: document.content,
+  }));
+
+  return {
+    files,
+    files_scanned: files.length,
+    files_skipped: collected.filesSkipped,
+    truncated: collected.truncated,
   };
 }
