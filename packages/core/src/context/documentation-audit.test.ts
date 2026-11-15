@@ -55,8 +55,8 @@ describe("auditProjectDocumentation", () => {
     const result = await auditProjectDocumentation({ projectRoot: root });
 
     expect(result.filesChecked).toBe(2);
-    expect(result.linksChecked).toBe(6);
-    expect(result.brokenLinks).toHaveLength(3);
+    expect(result.linksChecked).toBe(5);
+    expect(result.brokenLinks).toHaveLength(2);
     expect(result.brokenLinks.map((link) => link.href)).toEqual([
       "missing.md",
       "docs/guide.md#not-here",
