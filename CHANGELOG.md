@@ -14,6 +14,7 @@ All notable changes to Aether are documented here.
 - Stage lifecycle state machine.
 - Human-mediated agent handoff contracts and evidence-based result verification.
 - Interactive CLI launch for Claude Code, Codex, Gemini CLI, and Antigravity with host-managed permission prompts.
+- Bounded local project-context search with deterministic lexical ranking and safety limits.
 - Generic, Claude Code, Codex, OpenCode, Gemini CLI, and Antigravity adapter descriptors.
 - Conservative project initialization, update, doctor, and uninstall operations.
 - Workflow bundle installation, listing, and validation.
