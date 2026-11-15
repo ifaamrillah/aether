@@ -1,5 +1,5 @@
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ProjectContextSearchError, searchProjectContext } from "./retrieval.js";
@@ -84,7 +84,7 @@ describe("searchProjectContext", () => {
   it("skips symbolic links and binary content", async () => {
     await writeProjectFile("safe.md", "A safe project context file.\n");
     await writeProjectFile("binary.md", Buffer.from([0, 1, 2, 3, 4]));
-    const outside = join(root, "..", "aether-context-outside.md");
+    const outside = join(root, "..", basename(root) + "-outside.md");
     await writeFile(outside, "externalcontextsensitiveword\n");
     await symlink(outside, join(root, "linked.md"));
 
@@ -120,6 +120,19 @@ describe("searchProjectContext", () => {
 
     expect(result.results.length).toBeGreaterThan(0);
     expect(result.characters_used).toBeLessThanOrEqual(256);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("enforces the total bytes read across the project", async () => {
+    await writeProjectFile("a-first.md", "totalbudgetcontext first file\n");
+    await writeProjectFile("b-second.md", "totalbudgetcontext second file\n");
+
+    const result = await searchProjectContext("totalbudgetcontext", {
+      projectRoot: root,
+      maxTotalBytes: 34,
+    });
+
+    expect(result.files_scanned).toBe(1);
     expect(result.truncated).toBe(true);
   });
 
