@@ -155,6 +155,50 @@ The adapter registry also declares each host's skill discovery directory. Curren
 
 These paths follow the platforms' documented project-level skill discovery conventions: [Claude Code](https://code.claude.com/docs/en/skills), [Codex](https://developers.openai.com/codex/skills), [OpenCode](https://opencode.ai/docs/skills/), [Gemini CLI](https://geminicli.com/docs/cli/skills/), and [Antigravity](https://antigravity.google/docs/skills).
 
+## Human approval and trusted reviewer identities
+
+Workflow stages can require a human decision, a cryptographically verified reviewer identity, and role authorization before an agent receives a handoff:
+
+```yaml
+stages:
+  - id: protected-change
+    skill: implementation
+    required: true
+    approval:
+      mode: required
+      risk: high
+      require_signature: true
+      allowed_approvers: [release-maintainer]
+      required_roles: [maintainer, security]
+      prevent_self_approval: true
+```
+
+Create a local Ed25519 key pair and register its public key in the project trust registry:
+
+```bash
+aether trust keygen --id release-maintainer
+aether trust register --id release-maintainer --public-key .aether/keys/release-maintainer.public.pem --roles maintainer,security
+aether trust list
+aether trust validate
+```
+
+The private key stays in `.aether/keys/` (Git-ignored and written with owner-only permissions). Share and review the public key through `.aether/trust/approvers.json`; never commit or send the private key. Each trusted identity must have a unique ID, an Ed25519 public key, one or more roles, and an active flag.
+
+Approve or reject with the identity ID and its private key:
+
+```bash
+aether workflow status <run-id>
+aether workflow approve <run-id> --file workflows/feature.yaml --stage protected-change --by release-maintainer --key .aether/keys/release-maintainer.private.pem --reason "Scope reviewed"
+aether workflow reject <run-id> --file workflows/feature.yaml --stage protected-change --by release-maintainer --key .aether/keys/release-maintainer.private.pem --reason "Reduce the write scope"
+```
+
+The Ed25519 signature covers the approval ID, action digest, decision, reviewer identity, timestamp, reason, and policy version. Core verifies it against the project trust registry during the decision and again during event recovery. Allowlisted identities and required roles are enforced; self-approval is denied by default. Key rotation should use a new identity ID so historic signatures remain verifiable.
+
+Stages using `approval.mode: optional` start normally and can be gated later with `workflow request-approval`. Rejected stages remain blocked until a fresh approval request is made. Unsigned approval remains available only for stages that do not set `require_signature: true`; their `--by` values are audit labels, not authenticated identities.
+
+The trust registry is a project-controlled root of trust: protect changes to it with branch protection and code review. A local attacker who can replace the registry or runtime event log can undermine local verification. These gates do not provide OS isolation, deployment credentials, or an external identity provider.
+
+See [Approval gates](docs/architecture/approval-gates.md) for lifecycle details and trust boundaries.
 ## UI design workflow
 
 For a UI change that needs explicit design work before engineering specification, use the dedicated UI Improvement workflow. Validate and run workflows/ui-improvement.yaml with the desired UI change as the ui_change input.

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -581,5 +581,158 @@ describe("WorkflowRunService", () => {
     expect(discoveryDone.stages["ui-prototype"]?.status).toBe("skipped");
   });
 
+
+  it("gates required stages behind a digest-bound approval record", async () => {
+    const gatedWorkflow: WorkflowDefinition = { ...workflow, stages: [
+      { ...workflow.stages[0]!, approval: { mode: "required", risk: "high" } },
+      ...workflow.stages.slice(1),
+    ] };
+    const created = await service.createRun(gatedWorkflow, { feature_description: "Add settings safely" });
+    const started = await service.startRun(created.id, gatedWorkflow);
+    expect(started.status).toBe("awaiting_approval");
+    expect(started.stages.discovery?.status).toBe("awaiting_approval");
+    expect(started.stages.discovery?.approval_id).toMatch(/^approval_/);
+    const store = new FileStateStore(projectRoot);
+    const events = await store.readEvents(created.id);
+    const requestEvent = events.find((event) => event.type === "stage.transitioned" && event.payload.to === "awaiting_approval");
+    const pending = requestEvent?.payload.approval as { status: string; action: { risk: string; context: { run_id: string; stage_id: string } }; action_digest: string } | undefined;
+    expect(pending?.status).toBe("pending");
+    expect(pending?.action.risk).toBe("high");
+    expect(pending?.action.context.run_id).toBe(created.id);
+    expect(pending?.action.context.stage_id).toBe("discovery");
+    expect(pending?.action_digest).toMatch(/^[a-f0-9]{64}$/);
+    await expect(service.transitionStage(created.id, gatedWorkflow, "discovery", "ready"))
+      .rejects.toBeInstanceOf(WorkflowRunConflictError);
+    const approved = await service.approveStage(created.id, gatedWorkflow, "discovery", "maintainer", "Reviewed the write scope.");
+    expect(approved.status).toBe("running");
+    expect(approved.stages.discovery?.status).toBe("ready");
+    const decisionEvent = (await store.readEvents(created.id))
+      .filter((event) => event.type === "stage.transitioned" && event.payload.approval)
+      .at(-1)!;
+    const record = decisionEvent.payload.approval as { status: string; decided_by: string; decision_reason: string };
+    expect(record.status).toBe("approved");
+    expect(record.decided_by).toBe("maintainer");
+    expect(record.decision_reason).toBe("Reviewed the write scope.");
+    await expect(service.approveStage(created.id, gatedWorkflow, "discovery", "maintainer"))
+      .rejects.toBeInstanceOf(WorkflowRunConflictError);
+  });
+
+  it("records rejections and requires a fresh approval request before retry", async () => {
+    const gatedWorkflow: WorkflowDefinition = { ...workflow, stages: [
+      { ...workflow.stages[0]!, approval: { mode: "required" } },
+      ...workflow.stages.slice(1),
+    ] };
+    const created = await service.createRun(gatedWorkflow, { feature_description: "Change a protected area" });
+    const started = await service.startRun(created.id, gatedWorkflow);
+    expect(started.stages.discovery?.status).toBe("awaiting_approval");
+    const rejected = await service.rejectStage(created.id, gatedWorkflow, "discovery", "maintainer", "The proposed scope is too broad.");
+    expect(rejected.status).toBe("blocked");
+    expect(rejected.stages.discovery?.status).toBe("blocked");
+    await expect(service.transitionStage(created.id, gatedWorkflow, "discovery", "ready"))
+      .rejects.toBeInstanceOf(WorkflowRunConflictError);
+    const reRequested = await service.requestStageApproval(created.id, gatedWorkflow, "discovery", "author");
+    expect(reRequested.stages.discovery?.status).toBe("awaiting_approval");
+    const approved = await service.approveStage(created.id, gatedWorkflow, "discovery", "maintainer");
+    expect(approved.stages.discovery?.status).toBe("ready");
+    const events = await new FileStateStore(projectRoot).readEvents(created.id);
+    const approvals = events.filter((event) => event.type === "stage.transitioned" && event.payload.approval)
+      .map((event) => event.payload.approval as { status: string; id: string });
+    expect(approvals.map((approval) => approval.status)).toEqual(["pending", "rejected", "pending", "approved"]);
+    expect(approvals[0]?.id).not.toBe(approvals[2]?.id);
+  });
+
+  it("reconciles run status after replaying an interrupted approval decision", async () => {
+    const gatedWorkflow: WorkflowDefinition = { ...workflow, stages: [
+      { ...workflow.stages[0]!, approval: { mode: "required" } },
+      ...workflow.stages.slice(1),
+    ] };
+    const created = await service.createRun(gatedWorkflow, { feature_description: "Recover an approval decision" });
+    const started = await service.startRun(created.id, gatedWorkflow);
+    expect(started.status).toBe("awaiting_approval");
+    const store = new FileStateStore(projectRoot);
+    const events = await store.readEvents(created.id);
+    const request = events.find((event) => event.type === "stage.transitioned" && event.payload.to === "awaiting_approval");
+    const pending = request?.payload.approval as Record<string, unknown> | undefined;
+    expect(pending).toBeDefined();
+    const decision = {
+      ...pending,
+      status: "approved",
+      decided_at: "2026-11-15T01:00:01.000Z",
+      decided_by: "maintainer",
+    };
+    await store.appendEvent(created.id, {
+      schema_version: 1,
+      event_id: "event_interrupted_approval_decision",
+      run_id: created.id,
+      sequence: started.last_event_sequence + 1,
+      type: "stage.transitioned",
+      timestamp: "2026-11-15T01:00:01.000Z",
+      actor: { type: "user", id: "maintainer" },
+      entity: { type: "stage", id: "discovery" },
+      payload: { stage_id: "discovery", to: "ready", approval: decision },
+    });
+    const recovered = await service.recoverRun(created.id, gatedWorkflow);
+    expect(recovered.status).toBe("running");
+    expect(recovered.stages.discovery?.status).toBe("ready");
+    expect(recovered.last_event_sequence).toBe(started.last_event_sequence + 2);
+    expect((await store.readEvents(created.id)).at(-1)?.type).toBe('run.status_changed');
+  });
+
+  it("requires a trusted signed reviewer with the configured authorization roles", async () => {
+    const pair = generateKeyPairSync("ed25519", {
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    });
+    await mkdir(join(projectRoot, ".aether", "trust"), { recursive: true });
+    await writeFile(join(projectRoot, ".aether", "trust", "approvers.json"), JSON.stringify({
+      schema_version: 1,
+      identities: [{ id: "release-maintainer", public_key_pem: pair.publicKey, roles: ["maintainer"], active: true }],
+    }));
+    const gatedWorkflow: WorkflowDefinition = { ...workflow, stages: [
+      {
+        ...workflow.stages[0]!,
+        approval: { mode: "required", require_signature: true, allowed_approvers: ["release-maintainer"], required_roles: ["maintainer"] },
+      },
+      ...workflow.stages.slice(1),
+    ] };
+    const created = await service.createRun(gatedWorkflow, { feature_description: "Require trusted review" });
+    const started = await service.startRun(created.id, gatedWorkflow);
+    expect(started.stages.discovery?.status).toBe("awaiting_approval");
+    await expect(service.approveStage(created.id, gatedWorkflow, "discovery", "release-maintainer"))
+      .rejects.toBeInstanceOf(WorkflowRunConflictError);
+    const approved = await service.approveStage(
+      created.id, gatedWorkflow, "discovery", "release-maintainer", "Reviewed release scope.",
+      { key_id: "release-maintainer", private_key_pem: pair.privateKey },
+    );
+    expect(approved.stages.discovery?.status).toBe("ready");
+    const events = await new FileStateStore(projectRoot).readEvents(created.id);
+    const decisionEvent = events.filter((event) => event.type === "stage.transitioned" && event.payload.approval).at(-1)!;
+    const decision = decisionEvent.payload.approval as { decision_signature?: { algorithm: string; key_id: string; signature: string } };
+    expect(decision.decision_signature?.algorithm).toBe("ed25519");
+    expect(decision.decision_signature?.key_id).toBe("release-maintainer");
+    expect(decision.decision_signature?.signature).toMatch(/^[A-Za-z0-9+/]+=*$/);
+  });
+
+  it("rejects trusted approvals from identities without the stage role or outside its allowlist", async () => {
+    const pair = generateKeyPairSync("ed25519", {
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    });
+    await mkdir(join(projectRoot, ".aether", "trust"), { recursive: true });
+    await writeFile(join(projectRoot, ".aether", "trust", "approvers.json"), JSON.stringify({
+      schema_version: 1,
+      identities: [{ id: "reviewer", public_key_pem: pair.publicKey, roles: ["developer"], active: true }],
+    }));
+    const gatedWorkflow: WorkflowDefinition = { ...workflow, stages: [
+      { ...workflow.stages[0]!, approval: { mode: "required", require_signature: true, allowed_approvers: ["release-maintainer"], required_roles: ["maintainer"] } },
+      ...workflow.stages.slice(1),
+    ] };
+    const created = await service.createRun(gatedWorkflow, { feature_description: "Reject untrusted reviewer" });
+    await service.startRun(created.id, gatedWorkflow);
+    await expect(service.approveStage(
+      created.id, gatedWorkflow, "discovery", "reviewer", undefined,
+      { key_id: "reviewer", private_key_pem: pair.privateKey },
+    )).rejects.toBeInstanceOf(WorkflowRunConflictError);
+  });
 
 });

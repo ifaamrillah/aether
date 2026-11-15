@@ -138,6 +138,70 @@ describe("canonical JSON Schemas", () => {
     })).toBe(true);
   });
 
+  it("validates a project trusted-approver registry structure", () => {
+    const ajv = new Ajv2020({ allErrors: true, strict: false });
+    addFormats(ajv);
+    for (const schema of schemas) ajv.addSchema(schema);
+    const validateTrust = ajv.getSchema("https://aether.dev/schemas/approver-trust.schema.json");
+    expect(validateTrust).toBeDefined();
+    expect(validateTrust?.({
+      schema_version: 1,
+      identities: [{
+        id: "maintainer",
+        public_key_pem: "-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\\n-----END PUBLIC KEY-----",
+        roles: ["maintainer", "security"],
+        active: true,
+      }],
+    })).toBe(true);
+    expect(validateTrust?.({ schema_version: 1, identities: [{ id: "maintainer", public_key_pem: "invalid", roles: [], active: true }] })).toBe(false);
+  });
+
+  it("validates digest-bound workflow approval records", () => {
+    const ajv = new Ajv2020({ allErrors: true, strict: false });
+    addFormats(ajv);
+    for (const schema of schemas) ajv.addSchema(schema);
+    const validateApproval = ajv.getSchema("https://aether.dev/schemas/approval.schema.json");
+    expect(validateApproval).toBeDefined();
+    const approval = {
+      schema_version: 1, id: "approval_123",
+      action: {
+        id: "stage-run_123-production-change", type: "workflow.stage.execute",
+        target: "production-change", risk: "high", requested_by: "system",
+        context: {
+          run_id: "run_123", workflow_id: "release-workflow", workflow_version: 1,
+          stage_id: "production-change",
+          scope: { read_paths: ["src/**"], write_paths: ["src/**"] },
+          acceptance_criteria: ["Review the implementation"],
+        },
+      },
+      status: "pending", requested_at: "2026-11-15T01:00:00.000Z",
+      requested_by: "system", policy_version: "aether-approval-v1",
+      action_digest: "a".repeat(64),
+    };
+    expect(validateApproval?.(approval)).toBe(true);
+    const signedApproval = {
+      ...approval,
+      status: "approved",
+      decided_at: "2026-11-15T01:05:00.000Z",
+      decided_by: "maintainer",
+      decision_reason: "Reviewed.",
+      decision_signature: {
+        algorithm: "ed25519",
+        key_id: "maintainer",
+        roles: ["maintainer", "security"],
+        signature: "A".repeat(86) + "==",
+      },
+    };
+    expect(validateApproval?.(signedApproval)).toBe(true);
+    const malformedSignature = {
+      ...signedApproval,
+      decision_signature: { ...signedApproval.decision_signature, algorithm: "rsa" },
+    };
+    expect(validateApproval?.(malformedSignature)).toBe(false);
+    const withoutDigest = { ...approval } as Record<string, unknown>;
+    delete withoutDigest.action_digest;
+    expect(validateApproval?.(withoutDigest)).toBe(false);
+  });
   it("accepts a minimal valid workflow definition", () => {
     const ajv = new Ajv2020({ allErrors: true, strict: false });
     addFormats(ajv);

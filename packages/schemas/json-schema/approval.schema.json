@@ -4,31 +4,122 @@
   "title": "Aether Approval Record",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "id", "action", "status", "requested_at", "requested_by", "policy_version"],
+  "required": [
+    "schema_version",
+    "id",
+    "action",
+    "status",
+    "requested_at",
+    "requested_by",
+    "policy_version",
+    "action_digest"
+  ],
   "properties": {
-    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
-    "id": { "$ref": "common.schema.json#/$defs/identifier" },
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/identifier"
+    },
     "action": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "type", "risk", "requested_by", "context"],
+      "required": [
+        "id",
+        "type",
+        "risk",
+        "requested_by",
+        "context"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "type": { "type": "string" },
-        "target": { "type": "string" },
-        "risk": { "enum": ["low", "medium", "high", "critical"] },
-        "requested_by": { "type": "string" },
-        "context": { "type": "object" }
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "risk": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "requested_by": {
+          "type": "string"
+        },
+        "context": {
+          "type": "object"
+        }
       }
     },
-    "status": { "enum": ["pending", "approved", "rejected", "expired", "revoked"] },
-    "requested_at": { "$ref": "common.schema.json#/$defs/timestamp" },
-    "requested_by": { "type": "string" },
-    "decided_at": { "$ref": "common.schema.json#/$defs/timestamp" },
-    "decided_by": { "type": "string" },
-    "decision_reason": { "type": "string" },
-    "expires_at": { "$ref": "common.schema.json#/$defs/timestamp" },
-    "policy_version": { "type": "string" },
-    "action_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    "status": {
+      "enum": [
+        "pending",
+        "approved",
+        "rejected",
+        "expired",
+        "revoked"
+      ]
+    },
+    "requested_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "requested_by": {
+      "type": "string"
+    },
+    "decided_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "decided_by": {
+      "type": "string"
+    },
+    "decision_reason": {
+      "type": "string"
+    },
+    "expires_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "policy_version": {
+      "type": "string"
+    },
+    "action_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "decision_signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "key_id",
+        "roles",
+        "signature"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "ed25519"
+        },
+        "key_id": {
+          "$ref": "common.schema.json#/$defs/identifier"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/identifier"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+        }
+      }
+    }
   }
 }

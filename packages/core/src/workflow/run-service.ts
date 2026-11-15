@@ -9,6 +9,7 @@ import type {
   WorkflowEvent,
   WorkflowRunSnapshot,
   StageVerificationReference,
+  ApprovalRecord,
 } from "../state/types.js";
 import { transitionStageState } from "../state/stage-transitions.js";
 import { StateIntegrityError } from "../state/errors.js";
@@ -20,6 +21,8 @@ import {
 import { getRequiredExecutionStageIds, validateWorkflowSemantics } from "./validate-workflow.js";
 import { evaluateWorkflowCondition } from "./condition.js";
 import type { WorkflowDefinition, WorkflowInputDefinition } from "./types.js";
+import { loadApprovalTrustStore, signApprovalDecision, verifyApprovalDecisionSignature } from "../approval-trust.js";
+import type { ApprovalSigner } from "../approval-trust.js";
 
 export interface WorkflowRunServiceOptions {
   projectRoot: string;
@@ -33,6 +36,7 @@ export interface WorkflowRunServiceOptions {
 export interface StageTransitionOptions {
   reason?: string;
   verification?: StageVerificationReference;
+  approval?: ApprovalRecord;
 }
 
 const ACTIVE_STAGE_STATUSES = new Set<StageStatus>([
@@ -371,13 +375,32 @@ export class WorkflowRunService {
           );
         }
 
+        let approvalId: string | undefined;
+        if (targetStatus === "awaiting_approval") {
+          if (!definition.approval || definition.approval.mode === "none" || (currentStage.status === "pending" && definition.approval.mode !== "required") || !this.dependenciesCompleted(definition, snapshot)) {
+            throw new StateIntegrityError('Run "' + runId + '" recorded an approval request for an ineligible stage.');
+          }
+          if (definition.condition && !evaluateWorkflowCondition(definition.condition, this.conditionContext(snapshot))) {
+            throw new StateIntegrityError('Run "' + runId + '" recorded approval for a conditional stage whose condition is false.');
+          }
+          approvalId = (await this.assertApprovalRecord(event.payload.approval, runId, workflow, definition, "pending")).id;
+        } else if (currentStage.status === "awaiting_approval") {
+          const expected = targetStatus === "ready" ? "approved" : targetStatus === "blocked" ? "rejected" : undefined;
+          if (!expected) throw new StateIntegrityError('Run "' + runId + '" moved a stage out of awaiting_approval without a decision.');
+          const decision = await this.assertApprovalRecord(event.payload.approval, runId, workflow, definition, expected);
+          if (decision.id !== currentStage.approval_id) throw new StateIntegrityError("Approval decision does not match the pending stage approval.");
+          approvalId = decision.id;
+        } else if (targetStatus === "ready" && currentStage.approval_id) {
+          throw new StateIntegrityError('Run "' + runId + '" returned a previously gated stage to ready without a new approval.');
+        } else if (event.payload.approval !== undefined) {
+          throw new StateIntegrityError('Run "' + runId + '" contains an unexpected approval record on a stage transition.');
+        }
         const nextStage = transitionStageState(currentStage, {
           to: targetStatus,
           event_sequence: event.sequence,
           timestamp: event.timestamp,
-          ...(typeof event.payload.reason === "string"
-            ? { reason: event.payload.reason }
-            : {}),
+          ...(typeof event.payload.reason === "string" ? { reason: event.payload.reason } : {}),
+          ...(approvalId === undefined ? {} : { approval_id: approvalId }),
         });
         if (targetStatus === "completed") {
           const verification = event.payload.verification as StageVerificationReference | undefined;
@@ -452,9 +475,12 @@ export class WorkflowRunService {
     }
 
     // A crash may occur after run.started was logged but before its root
-    // stages were promoted. Reconcile eligible stages after replay.
+    // stages were promoted. Also refresh aggregate status when a stage
+    // approval decision was replayed but its run.status_changed event was not.
     if (snapshot.status === "running") {
       snapshot = await this.promoteReadyStages(snapshot, workflow);
+      snapshot = await this.refreshRunStatus(snapshot, workflow);
+    } else if (["awaiting_approval", "blocked", "failed"].includes(snapshot.status)) {
       snapshot = await this.refreshRunStatus(snapshot, workflow);
     }
 
@@ -530,6 +556,55 @@ export class WorkflowRunService {
     return this.refreshRunStatus(snapshot, workflow);
   }
 
+  async requestStageApproval(runId: string, workflow: WorkflowDefinition, stageId: string, requestedBy: string): Promise<WorkflowRunSnapshot> {
+    const requester = requestedBy.trim();
+    if (!requester) throw new WorkflowRunConflictError("An approval requester identity is required.");
+    const snapshot = await this.loadConsistentRun(runId, workflow);
+    const definition = workflow.stages.find((stage) => stage.id === stageId);
+    const stage = snapshot.stages[stageId];
+    if (!definition || !stage) throw new WorkflowRunConflictError('Stage "' + stageId + '" does not belong to workflow "' + workflow.id + '".');
+    if (!definition.approval || definition.approval.mode === "none") throw new WorkflowRunConflictError('Stage "' + stageId + '" does not support approval requests.');
+    if (!["ready", "blocked", "failed"].includes(stage.status)) throw new WorkflowRunConflictError('Stage "' + stageId + '" cannot request approval from status "' + stage.status + '".');
+    if (!this.dependenciesCompleted(definition, snapshot)) throw new WorkflowRunConflictError('Stage "' + stageId + '" cannot request approval before its dependencies complete.');
+    if (definition.condition && !evaluateWorkflowCondition(definition.condition, this.conditionContext(snapshot))) {
+      throw new WorkflowRunConflictError('Conditional stage "' + stageId + '" cannot request approval when its condition is false.');
+    }
+    const approval = this.createStageApproval(runId, workflow, definition, requester, this.timestamp());
+    return this.transitionStage(runId, workflow, stageId, "awaiting_approval", { approval });
+  }
+
+  async approveStage(runId: string, workflow: WorkflowDefinition, stageId: string, decidedBy: string, reason?: string, signer?: ApprovalSigner): Promise<WorkflowRunSnapshot> {
+    const approver = decidedBy.trim();
+    if (!approver) throw new WorkflowRunConflictError("An approval decision identity is required.");
+    const snapshot = await this.loadConsistentRun(runId, workflow);
+    const definition = workflow.stages.find((stage) => stage.id === stageId);
+    const stage = snapshot.stages[stageId];
+    if (!definition || !stage) throw new WorkflowRunConflictError('Stage "' + stageId + '" does not belong to workflow "' + workflow.id + '".');
+    if (stage.status !== "awaiting_approval" || !stage.approval_id) throw new WorkflowRunConflictError('Stage "' + stageId + '" is not awaiting an approval decision.');
+    const stored = await this.loadStageApproval(runId, stageId, stage.approval_id);
+    const pending = await this.assertApprovalRecord(stored, runId, workflow, definition, "pending");
+    const timestamp = this.timestamp();
+    if (pending.expires_at && Date.parse(pending.expires_at) <= Date.parse(timestamp)) {
+      throw new WorkflowRunConflictError('Approval "' + pending.id + '" has expired and cannot be approved.');
+    }
+    const approval = await this.createApprovalDecision(pending, definition, "approved", approver, timestamp, reason, signer);
+    return this.transitionStage(runId, workflow, stageId, "ready", { approval });
+  }
+
+  async rejectStage(runId: string, workflow: WorkflowDefinition, stageId: string, decidedBy: string, reason: string, signer?: ApprovalSigner): Promise<WorkflowRunSnapshot> {
+    const approver = decidedBy.trim();
+    const decisionReason = reason.trim();
+    if (!approver || !decisionReason) throw new WorkflowRunConflictError("A rejection requires both a decision identity and a non-empty reason.");
+    const snapshot = await this.loadConsistentRun(runId, workflow);
+    const definition = workflow.stages.find((stage) => stage.id === stageId);
+    const stage = snapshot.stages[stageId];
+    if (!definition || !stage) throw new WorkflowRunConflictError('Stage "' + stageId + '" does not belong to workflow "' + workflow.id + '".');
+    if (stage.status !== "awaiting_approval" || !stage.approval_id) throw new WorkflowRunConflictError('Stage "' + stageId + '" is not awaiting an approval decision.');
+    const stored = await this.loadStageApproval(runId, stageId, stage.approval_id);
+    const pending = await this.assertApprovalRecord(stored, runId, workflow, definition, "pending");
+    const approval = await this.createApprovalDecision(pending, definition, "rejected", approver, this.timestamp(), decisionReason, signer);
+    return this.transitionStage(runId, workflow, stageId, "blocked", { reason: decisionReason, approval });
+  }
   async transitionStage(
     runId: string,
     workflow: WorkflowDefinition,
@@ -550,6 +625,33 @@ export class WorkflowRunService {
       throw new WorkflowRunConflictError(
         'Stage "' + stageId + '" does not belong to workflow "' + workflow.id + '".',
       );
+    }
+    if (to === "awaiting_approval") {
+      if (!stageDefinition.approval || stageDefinition.approval.mode === "none") throw new WorkflowRunConflictError('Stage "' + stageId + '" does not define an approval gate.');
+      if (currentStage.status === "pending" && stageDefinition.approval.mode !== "required") throw new WorkflowRunConflictError("A pending stage may enter approval only when its approval mode is required.");
+      if (!this.dependenciesCompleted(stageDefinition, snapshot)) throw new WorkflowRunConflictError('Stage "' + stageId + '" cannot await approval before its dependencies complete.');
+      if (stageDefinition.condition && !evaluateWorkflowCondition(stageDefinition.condition, this.conditionContext(snapshot))) {
+        throw new WorkflowRunConflictError('Conditional stage "' + stageId + '" cannot await approval when its condition is false.');
+      }
+      if (!options.approval) throw new WorkflowRunConflictError("An approval record is required to enter awaiting_approval.");
+      await this.assertApprovalRecord(options.approval, runId, workflow, stageDefinition, "pending");
+    }
+
+    if (currentStage.status === "awaiting_approval") {
+      const expected = to === "ready" ? "approved" : to === "blocked" ? "rejected" : undefined;
+      if (!expected) throw new WorkflowRunConflictError('Stage "' + stageId + '" must receive an approval decision before leaving awaiting_approval.');
+      if (!options.approval || options.approval.id !== currentStage.approval_id) {
+        throw new WorkflowRunConflictError("A matching approval decision is required to leave awaiting_approval.");
+      }
+      const decision = await this.assertApprovalRecord(options.approval, runId, workflow, stageDefinition, expected);
+      if (decision.id !== currentStage.approval_id) throw new WorkflowRunConflictError("Approval decision does not match the pending stage approval.");
+    }
+
+    if (to === "ready" && currentStage.approval_id && currentStage.status !== "awaiting_approval") {
+      throw new WorkflowRunConflictError("A fresh approval request is required before this stage can become ready again.");
+    }
+    if (to === "ready" && stageDefinition.approval?.mode === "required" && currentStage.status !== "awaiting_approval") {
+      throw new WorkflowRunConflictError('Stage "' + stageId + '" requires a new approval before it can become ready.');
     }
 
     if (to === "ready" && !this.dependenciesCompleted(stageDefinition, snapshot)) {
@@ -602,10 +704,12 @@ export class WorkflowRunService {
       event_sequence: snapshot.last_event_sequence + 1,
       timestamp,
       ...(options.reason === undefined ? {} : { reason: options.reason }),
+      ...(options.approval === undefined ? {} : { approval_id: options.approval.id }),
     });
 
     const payload: Record<string, unknown> = { stage_id: stageId, to };
     if (options.reason !== undefined) payload.reason = options.reason;
+    if (options.approval !== undefined) payload.approval = options.approval;
     if (to === "completed") {
       const verification = options.verification ?? currentStage.verification!;
       nextStage.verification = verification;
@@ -627,6 +731,113 @@ export class WorkflowRunService {
     return this.refreshRunStatus(snapshot, workflow);
   }
 
+  private async createApprovalDecision(
+    pending: ApprovalRecord,
+    definition: WorkflowDefinition["stages"][number],
+    status: "approved" | "rejected",
+    decidedBy: string,
+    decidedAt: string,
+    reason: string | undefined,
+    signer: ApprovalSigner | undefined,
+  ): Promise<ApprovalRecord> {
+    const approval: ApprovalRecord = {
+      ...pending,
+      status,
+      decided_at: decidedAt,
+      decided_by: decidedBy,
+      ...(reason?.trim() ? { decision_reason: reason.trim() } : {}),
+    };
+    const policy = definition.approval;
+    if (policy?.require_signature && !signer) {
+      throw new WorkflowRunConflictError("This stage requires a cryptographically signed approval decision; provide --key.");
+    }
+    if (signer) {
+      try {
+        const trustStore = await loadApprovalTrustStore(this.projectRoot);
+        signApprovalDecision(approval, signer, trustStore, policy);
+      } catch (error) {
+        throw new WorkflowRunConflictError(error instanceof Error ? error.message : "Approval authorization failed.");
+      }
+    }
+    return approval;
+  }
+  private createStageApproval(runId: string, workflow: WorkflowDefinition, definition: WorkflowDefinition["stages"][number], requestedBy: string, timestamp: string): ApprovalRecord {
+    const context = {
+      run_id: runId, workflow_id: workflow.id, workflow_version: workflow.version, stage_id: definition.id,
+      scope: { read_paths: definition.scope?.read_paths ?? [], write_paths: definition.scope?.write_paths ?? [] },
+      acceptance_criteria: definition.acceptance_criteria ?? [],
+    };
+    const action = {
+      id: "stage-" + runId + "-" + definition.id,
+      type: "workflow.stage.execute",
+      target: definition.id,
+      risk: definition.approval?.risk ?? "medium",
+      requested_by: requestedBy, context,
+    };
+    return {
+      schema_version: 1,
+      id: "approval_" + this.idFactory(),
+      action,
+      status: "pending",
+      requested_at: timestamp, requested_by: requestedBy,
+      policy_version: "aether-approval-v1",
+      action_digest: createHash("sha256").update(JSON.stringify(action), "utf8").digest("hex"),
+    };
+  }
+
+  private async assertApprovalRecord(value: unknown, runId: string, workflow: WorkflowDefinition, definition: WorkflowDefinition["stages"][number], expectedStatus: ApprovalRecord["status"]): Promise<ApprovalRecord> {
+    const invalid = (message: string): never => { throw new StateIntegrityError("Invalid approval record: " + message); };
+    if (!isPlainObject(value)) invalid("record must be an object.");
+    const record = value as unknown as ApprovalRecord;
+    if (record.schema_version !== 1 || typeof record.id !== "string" ||
+        !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(record.id) || record.status !== expectedStatus ||
+        record.policy_version !== "aether-approval-v1" || typeof record.requested_by !== "string" || !record.requested_by.trim() ||
+        typeof record.requested_at !== "string" || !Number.isFinite(Date.parse(record.requested_at)) ||
+        typeof record.action_digest !== "string" || !/^[a-f0-9]{64}$/.test(record.action_digest)) {
+      invalid("metadata, status, requester, timestamp, or digest is malformed.");
+    }
+    if (!isPlainObject(record.action) || !isPlainObject(record.action.context)) invalid("action and context must be plain objects.");
+    const expectedContext = {
+      run_id: runId, workflow_id: workflow.id, workflow_version: workflow.version, stage_id: definition.id,
+      scope: { read_paths: definition.scope?.read_paths ?? [], write_paths: definition.scope?.write_paths ?? [] },
+      acceptance_criteria: definition.acceptance_criteria ?? [],
+    };
+    const risk = definition.approval?.risk ?? "medium";
+    if (record.action.id !== "stage-" + runId + "-" + definition.id || record.action.type !== "workflow.stage.execute" ||
+        record.action.target !== definition.id || record.action.risk !== risk || record.action.requested_by !== record.requested_by ||
+        JSON.stringify(record.action.context) !== JSON.stringify(expectedContext)) {
+      invalid("action does not match this run, workflow, stage, scope, or acceptance criteria.");
+    }
+    const digest = createHash("sha256").update(JSON.stringify(record.action), "utf8").digest("hex");
+    if (digest !== record.action_digest) invalid("action digest does not match the recorded action.");
+    if (record.expires_at !== undefined && (typeof record.expires_at !== "string" || !Number.isFinite(Date.parse(record.expires_at)))) invalid("expiry timestamp is malformed.");
+    if (expectedStatus === "pending") {
+      if (record.decided_at !== undefined || record.decided_by !== undefined || record.decision_reason !== undefined || record.decision_signature !== undefined) invalid("a pending approval cannot contain a decision or signature.");
+    } else {
+      if (typeof record.decided_at !== "string" || !Number.isFinite(Date.parse(record.decided_at)) || typeof record.decided_by !== "string" || !record.decided_by.trim()) {
+        invalid("a decision requires a valid timestamp and decision identity.");
+      }
+      if (expectedStatus === "rejected" && (typeof record.decision_reason !== "string" || !record.decision_reason.trim())) invalid("a rejection requires a non-empty reason.");
+      const requiresSignature = definition.approval?.require_signature === true;
+      if (requiresSignature || record.decision_signature !== undefined) {
+        const trustStore = await loadApprovalTrustStore(this.projectRoot);
+        verifyApprovalDecisionSignature(record, trustStore, requiresSignature, definition.approval);
+      }
+    }
+    return record;
+  }
+
+  private async loadStageApproval(runId: string, stageId: string, approvalId: string): Promise<ApprovalRecord> {
+    const events = await this.store.readEvents(runId);
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index]!;
+      if (event.type === "stage.transitioned" && event.entity.type === "stage" && event.entity.id === stageId &&
+          isPlainObject(event.payload.approval) && event.payload.approval.id === approvalId) {
+        return event.payload.approval as unknown as ApprovalRecord;
+      }
+    }
+    throw new WorkflowRunConflictError('Approval "' + approvalId + '" for stage "' + stageId + '" was not found in the event history.');
+  }
   /**
    * Re-checks a persisted verification manifest at the trust boundary.
    * A caller cannot complete a stage by constructing a "passed" object:
@@ -913,19 +1124,24 @@ export class WorkflowRunService {
       const conditionPassed = definition.condition
         ? evaluateWorkflowCondition(definition.condition, this.conditionContext(snapshot))
         : true;
-      const targetStatus: StageStatus = conditionPassed ? "ready" : "skipped";
       const timestamp = this.timestamp();
+      const approval = conditionPassed && definition.approval?.mode === "required"
+        ? this.createStageApproval(snapshot.id, workflow, definition, "system", timestamp)
+        : undefined;
+      const targetStatus: StageStatus = !conditionPassed ? "skipped" : approval ? "awaiting_approval" : "ready";
       const next = transitionStageState(stage, {
         to: targetStatus,
         event_sequence: snapshot.last_event_sequence + 1,
         timestamp,
         ...(!conditionPassed ? { reason: "Condition evaluated to false." } : {}),
+        ...(approval === undefined ? {} : { approval_id: approval.id }),
       });
       const payload: Record<string, unknown> = {
         stage_id: definition.id,
         to: targetStatus,
       };
       if (!conditionPassed) payload.reason = "Condition evaluated to false.";
+      if (approval !== undefined) payload.approval = approval;
 
       snapshot = await this.commitStageState(
         snapshot,

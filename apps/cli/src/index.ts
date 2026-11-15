@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createPublicKey, generateKeyPairSync, randomUUID } from "node:crypto";
 import {
   mkdir,
   readFile,
   realpath,
+  stat,
   rename,
   writeFile,
 } from "node:fs/promises";
@@ -17,7 +18,9 @@ import {
   verifyTaskResult,
   searchProjectContext,
   auditProjectDocumentation,
+  loadApprovalTrustStore,
 } from "@aether/core";
+import type { ApprovalSigner } from "@aether/core";
 import type { StageTaskContract, TaskResultSubmission } from "@aether/core";
 import { createAgentAdapter, runAgentCommand } from "@aether/adapters";
 import { inspectAgentPlatforms } from "./commands/platform-info.js";
@@ -71,6 +74,16 @@ Commands:
                                                Launch one interactive agent CLI stage
   workflow accept <run-id> --file <file> --stage <id> --result <json>
                                                Verify task result and complete its stage
+  workflow request-approval <run-id> --file <file> --stage <id> --by <name>
+                                               Request approval for an eligible stage
+  trust keygen --id <identity> [--dir <path>]  Generate an Ed25519 reviewer key pair
+  trust register --id <identity> --public-key <pem> --roles <a,b>
+                                               Add a public key to the project trust registry
+  trust list | trust validate                  Inspect the project approver registry
+  workflow approve <run-id> --file <file> --stage <id> --by <name> [--reason <text>]
+                                               Approve a pending stage gate
+  workflow reject <run-id> --file <file> --stage <id> --by <name> --reason <text>
+                                               Reject a pending stage gate
   workflow pause <run-id>                     Pause a running workflow
   workflow resume <run-id> --file <file>       Recover if needed, then resume a paused workflow
   workflow recover <run-id> --file <file>      Replay pending events and reconcile run state
@@ -209,6 +222,7 @@ function printRun(snapshot: {
     status: string;
     attempt: number;
     verification?: { evidence_count: number };
+    approval_id?: string;
   }>;
 }): void {
   console.log("Run: " + snapshot.id);
@@ -219,9 +233,10 @@ function printRun(snapshot: {
     const evidence = stage.verification
       ? " | evidence " + stage.verification.evidence_count
       : "";
+    const approval = stage.approval_id ? " | approval " + stage.approval_id : "";
     console.log(
       "  " + stage.stage_id.padEnd(24) + stage.status.padEnd(22) +
-      "attempt " + stage.attempt + evidence,
+      "attempt " + stage.attempt + evidence + approval,
     );
   }
 }
@@ -598,6 +613,45 @@ async function acceptWorkflowTask(
   return 0;
 }
 
+async function runWorkflowApprovalCommand(
+  runId: string,
+  args: string[],
+  action: "request" | "approve" | "reject",
+): Promise<number> {
+  const options = parseOptions(
+    args,
+    action === "request" ? ["--file", "--stage", "--by"] : ["--file", "--stage", "--by", "--reason", "--key"],
+  );
+  const filePath = options["--file"];
+  const stageId = options["--stage"];
+  const actor = options["--by"];
+  const reason = options["--reason"];
+  const keyPath = options["--key"];
+  if (!filePath || !stageId || !actor) throw new Error("Missing --file, --stage, or --by for workflow approval command.");
+  if (action === "reject" && !reason?.trim()) throw new Error("workflow reject requires a non-empty --reason.");
+  let signer: ApprovalSigner | undefined;
+  if (keyPath) {
+    const keyStats = await stat(keyPath);
+    if (!keyStats.isFile()) throw new Error("Approver private key must be a regular file.");
+    if (process.platform !== "win32" && (keyStats.mode & 0o077) !== 0) {
+      throw new Error("Approver private key permissions are too broad; restrict the file to its owner (0600).");
+    }
+    signer = { key_id: actor, private_key_pem: await readFile(keyPath, "utf8") };
+  }
+  const workflow = await loadWorkflowFile(filePath);
+  const service = createRunService();
+  const snapshot = action === "request"
+    ? await service.requestStageApproval(runId, workflow, stageId, actor)
+    : action === "approve"
+      ? await service.approveStage(runId, workflow, stageId, actor, reason, signer)
+      : await service.rejectStage(runId, workflow, stageId, actor, reason!, signer);
+  printRun(snapshot);
+  if (action === "request") console.log("Approval request recorded in the workflow event history.");
+  if (action === "approve") console.log("Approval decision recorded and cryptographically verified. The stage is ready for handoff.");
+  if (action === "reject") console.log("Rejection recorded and cryptographically verified. The stage is blocked until revised and re-requested.");
+  return 0;
+}
+
 async function runWorkflowCommand(args: string[]): Promise<number> {
   const [subcommand, resource, ...options] = args;
 
@@ -661,7 +715,17 @@ async function runWorkflowCommand(args: string[]): Promise<number> {
     printRun(started);
     console.log("");
     console.log("Run state: .aether/runs/" + started.id);
-    console.log("Next: aether workflow handoff " + started.id + " --file " + resource);
+    const approvalStage = Object.values(started.stages).find(
+      (stage) => stage.status === "awaiting_approval",
+    );
+    if (approvalStage) {
+      console.log(
+        "Next: aether workflow approve " + started.id + " --file " + resource +
+          " --stage " + approvalStage.stage_id + " --by <name>",
+      );
+    } else {
+      console.log("Next: aether workflow handoff " + started.id + " --file " + resource);
+    }
     return 0;
   }
 
@@ -695,6 +759,16 @@ async function runWorkflowCommand(args: string[]): Promise<number> {
   if (subcommand === "accept") {
     if (!resource) throw new Error("Usage: aether workflow accept <run-id> --file <workflow-file> --stage <id> --result <result.json>");
     return acceptWorkflowTask(resource, options);
+  }
+
+  if (subcommand === "request-approval") {
+    if (!resource) throw new Error("Usage: aether workflow request-approval <run-id> --file <workflow-file> --stage <id> --by <name>");
+    return runWorkflowApprovalCommand(resource, options, "request");
+  }
+
+  if (subcommand === "approve" || subcommand === "reject") {
+    if (!resource) throw new Error("Usage: aether workflow " + subcommand + " <run-id> --file <workflow-file> --stage <id> --by <name>");
+    return runWorkflowApprovalCommand(resource, options, subcommand);
   }
 
   if (subcommand === "pause") {
@@ -853,6 +927,90 @@ async function runDocumentationCommand(args: string[]): Promise<number> {
 
   console.log("No broken internal links found.");
   return 0;
+}
+
+async function runTrustCommand(args: string[]): Promise<number> {
+  const [subcommand, ...values] = args;
+  if (subcommand === "keygen") {
+    const options = parseOptions(values, ["--id", "--dir"]);
+    const id = options["--id"];
+    const directory = options["--dir"] ?? ".aether/keys";
+    if (!id || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id)) throw new Error("trust keygen requires a valid --id.");
+    const privatePath = directory + "/" + id + ".private.pem";
+    const publicPath = directory + "/" + id + ".public.pem";
+    for (const path of [privatePath, publicPath]) {
+      try {
+        await readFile(path, "utf8");
+        throw new Error("Refusing to overwrite existing key file: " + path);
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("Refusing to overwrite")) throw error;
+        if (typeof error === "object" && error !== null && "code" in error && (error as {code?: unknown}).code !== "ENOENT") throw error;
+      }
+    }
+    const pair = generateKeyPairSync("ed25519", {
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    });
+    await writeProjectFile(privatePath, pair.privateKey);
+    await writeProjectFile(publicPath, pair.publicKey);
+    console.log("Generated Ed25519 approver key pair.");
+    console.log("Private key (keep secret): " + privatePath);
+    console.log("Public key (register/share): " + publicPath);
+    console.log("Next: aether trust register --id " + id + " --public-key " + publicPath + " --roles maintainer");
+    return 0;
+  }
+
+  if (subcommand === "register") {
+    const options = parseOptions(values, ["--id", "--public-key", "--roles"]);
+    const id = options["--id"];
+    const publicPath = options["--public-key"];
+    const roleValue = options["--roles"];
+    if (!id || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id) || !publicPath || !roleValue) {
+      throw new Error("Usage: aether trust register --id <identity> --public-key <pem> --roles <role1,role2>");
+    }
+    const roles = [...new Set(roleValue.split(",").map((role) => role.trim()).filter(Boolean))];
+    if (roles.length === 0 || roles.some((role) => !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(role))) {
+      throw new Error("--roles must contain one or more valid role identifiers.");
+    }
+    const publicKeyPem = await readFile(publicPath, "utf8");
+    const publicKey = createPublicKey(publicKeyPem);
+    if (publicKey.asymmetricKeyType !== "ed25519") throw new Error("Only Ed25519 approver public keys are supported.");
+    const registryPath = ".aether/trust/approvers.json";
+    let identities: Array<{id:string;public_key_pem:string;roles:string[];active:boolean}> = [];
+    try {
+      await readFile(registryPath, "utf8");
+      identities = (await loadApprovalTrustStore(process.cwd())).identities;
+    } catch (error) {
+      if (!(typeof error === "object" && error !== null && "code" in error && (error as {code?: unknown}).code === "ENOENT")) throw error;
+    }
+    if (identities.some((identity) => identity.id === id)) throw new Error("Trusted identity already exists: " + id + ". Use a new id for key rotation.");
+    identities.push({ id, public_key_pem: publicKeyPem, roles, active: true });
+    await writeProjectFile(registryPath, JSON.stringify({ schema_version: 1, identities }, null, 2) + "\n");
+    const validated = await loadApprovalTrustStore(process.cwd());
+    console.log("Registered trusted approver " + id + " with roles: " + roles.join(", ") + ".");
+    console.log("Trust registry identities: " + validated.identities.length);
+    return 0;
+  }
+
+  if (subcommand === "list" || subcommand === "validate") {
+    parseOptions(values, []);
+    const store = await loadApprovalTrustStore(process.cwd());
+    if (subcommand === "validate") {
+      console.log("Trusted approver registry is valid (" + store.identities.length + " identity/identities).");
+      return 0;
+    }
+    for (const identity of store.identities) {
+      console.log((identity.active ? "ACTIVE " : "DISABLED ") + identity.id + " — " + identity.roles.join(", "));
+    }
+    console.log(store.identities.length + " trusted approver identity/identities.");
+    return 0;
+  }
+
+  if (subcommand === "help" || subcommand === undefined) {
+    console.log("Usage: aether trust keygen --id <id> [--dir <path>] | trust register --id <id> --public-key <pem> --roles <a,b> | trust list | trust validate");
+    return 0;
+  }
+  throw new Error("Unknown trust command: " + subcommand);
 }
 
 async function runPlatformCommand(args: string[]): Promise<number> {
@@ -1158,6 +1316,15 @@ async function main(args: string[]): Promise<number> {
       return await runUninstallCommand(rest);
     } catch (error) {
       console.error(error instanceof Error ? error.message : "Aether uninstall failed.");
+      return 1;
+    }
+  }
+
+  if (command === "trust") {
+    try {
+      return await runTrustCommand(rest);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Trust command failed.");
       return 1;
     }
   }

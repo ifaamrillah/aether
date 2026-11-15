@@ -77,6 +77,22 @@ export function validateWorkflowSemantics(workflow: WorkflowDefinition): Workflo
   });
 
   workflow.stages.forEach((stage, index) => {
+    if (stage.approval && (stage.approval.allowed_approvers !== undefined ||
+        stage.approval.required_roles !== undefined || stage.approval.prevent_self_approval !== undefined) &&
+        stage.approval.require_signature !== true) {
+      issues.push({
+        code: "approval_policy_requires_signature",
+        path: "stages[" + index + "].approval",
+        message: 'Stage "' + stage.id + '" must require signed decisions when approver or role restrictions are configured.',
+      });
+    }
+    if (stage.approval?.require_signature && stage.approval.mode === "none") {
+      issues.push({
+        code: "approval_signature_requires_gate",
+        path: "stages[" + index + "].approval",
+        message: 'Stage "' + stage.id + '" cannot require signatures when its approval mode is none.',
+      });
+    }
     for (const dependency of stage.depends_on ?? []) {
       if (dependency === stage.id) {
         issues.push({
