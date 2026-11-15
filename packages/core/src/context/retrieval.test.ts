@@ -97,6 +97,54 @@ describe("searchProjectContext", () => {
     await rm(outside, { force: true });
   });
 
+  it("honors nested .gitignore globs, anchored paths, and negations", async () => {
+    await writeProjectFile(
+      ".gitignore",
+      [
+        "*.generated.md",
+        "!keep.generated.md",
+        "/root-only.md",
+        "private/",
+        "foo/**",
+        "\\!literal.md",
+        "\\#literal.md",
+      ].join("\n"),
+    );
+    await writeProjectFile("safe.md", "gitignoremarker safe file stays included\n");
+    await writeProjectFile("skip.generated.md", "gitignoremarker should be excluded\n");
+    await writeProjectFile("keep.generated.md", "gitignoremarker should be included\n");
+    await writeProjectFile("root-only.md", "gitignoremarker root anchored file\n");
+    await writeProjectFile("nested/root-only.md", "gitignoremarker nested file stays included\n");
+    await writeProjectFile("private/hidden.md", "gitignoremarker private directory\n");
+    await writeProjectFile("foo/hidden.md", "gitignoremarker double star directory\n");
+    await writeProjectFile("!literal.md", "gitignoremarker escaped exclamation\n");
+    await writeProjectFile("#literal.md", "gitignoremarker escaped hash\n");
+    await writeProjectFile("src/.gitignore", "*.test.ts\n!important.test.ts\n");
+    await writeProjectFile("src/skip.test.ts", "gitignoremarker nested ignore rule\n");
+    await writeProjectFile("src/important.test.ts", "gitignoremarker nested negation rule\n");
+    await writeProjectFile("src/foo/visible.md", "gitignoremarker anchored glob must not match here\n");
+
+    const result = await searchProjectContext("gitignoremarker", {
+      projectRoot: root,
+      limit: 30,
+      maxCharacters: 20_000,
+    });
+    const paths = new Set(result.results.map((item) => item.path));
+
+    expect(paths.has("keep.generated.md")).toBe(true);
+    expect(paths.has("nested/root-only.md")).toBe(true);
+    expect(paths.has("safe.md")).toBe(true);
+    expect(paths.has("!literal.md")).toBe(false);
+    expect(paths.has("#literal.md")).toBe(false);
+    expect(paths.has("src/important.test.ts")).toBe(true);
+    expect(paths.has("src/foo/visible.md")).toBe(true);
+    expect(paths.has("skip.generated.md")).toBe(false);
+    expect(paths.has("root-only.md")).toBe(false);
+    expect(paths.has("private/hidden.md")).toBe(false);
+    expect(paths.has("foo/hidden.md")).toBe(false);
+    expect(paths.has("src/skip.test.ts")).toBe(false);
+  });
+
   it("enforces a total excerpt character budget", async () => {
     await writeProjectFile(
       "docs/context.md",
