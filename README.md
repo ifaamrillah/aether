@@ -131,7 +131,7 @@ Retrieve bounded local project context for a task:
 node apps/cli/dist/index.js context search "workflow recovery" --limit 5 --max-chars 6000
 ```
 
-Context search uses deterministic lexical ranking over local text files. It does not create a persistent index, use embeddings, or send project content to a remote service. Common generated directories, binary files, symbolic links, obvious environment/credential files, and oversized content are excluded. This initial version does not yet interpret every custom `.gitignore` pattern or replace secret scanning; review repository ignore rules before using it on projects with private local files.
+Context search uses deterministic lexical ranking over local text files. It does not create a persistent index, use embeddings, or send project content to a remote service. Common generated directories, binary files, symbolic links, obvious environment/credential files, and oversized content are excluded. The retriever applies root and nested `.gitignore` rules, including common glob, anchored-path, and negation patterns. Hard-coded safety exclusions for environment/credential files, `.aether`, and dependency/cache directories remain excluded even when a negation rule attempts to re-include them. This is still not a secret scanner; review repository and local ignore rules before using it on projects with private local data.
 
 The adapter registry also declares each host's skill discovery directory. Current defaults are:
 
