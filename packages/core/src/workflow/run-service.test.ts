@@ -732,6 +732,25 @@ describe("WorkflowRunService", () => {
       entity: { type: "stage", id: "discovery" },
       payload: { stage_id: "discovery", to: "ready", approval: decision },
     });
+    const revokedService = new WorkflowRunService({
+      projectRoot,
+      projectId: "test-project",
+      clock: () => new Date(currentTime),
+      approvalAuthorizer: new Ed25519ApprovalAuthorizer({
+        schema_version: 1,
+        keys: [{
+          key_id: "maintainer-key",
+          issuer: "https://identity.test",
+          subject: "maintainer",
+          algorithm: "Ed25519",
+          public_key_pem: approvalPublicKey,
+          roles: ["approver", "release-manager"],
+          status: "revoked",
+        }],
+      }, { clock: () => new Date(currentTime) }),
+    });
+    await expect(revokedService.recoverRun(created.id, gatedWorkflow))
+      .rejects.toThrow(/unknown or revoked/);
     const recovered = await service.recoverRun(created.id, gatedWorkflow);
     expect(recovered.status).toBe("running");
     expect(recovered.stages.discovery?.status).toBe("ready");
