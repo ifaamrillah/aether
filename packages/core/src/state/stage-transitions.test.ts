@@ -43,9 +43,19 @@ describe("stage lifecycle state machine", () => {
     }
 
     expect(getAllowedStageTransitions("completed")).toEqual(["stale"]);
-    expect(getAllowedStageTransitions("pending")).toEqual(["ready", "skipped"]);
+    expect(getAllowedStageTransitions("pending")).toEqual(["ready", "awaiting_approval", "skipped"]);
   });
 
+  it("requires an approval id before entering awaiting_approval", () => {
+    expect(() => transitionStageState(createStage("ready"), {
+      to: "awaiting_approval", event_sequence: 2, timestamp,
+    })).toThrow(StateIntegrityError);
+    const awaiting = transitionStageState(createStage("ready"), {
+      to: "awaiting_approval", event_sequence: 2, timestamp, approval_id: "approval_123",
+    });
+    expect(awaiting.status).toBe("awaiting_approval");
+    expect(awaiting.approval_id).toBe("approval_123");
+  });
   it("advances a stage and increments the attempt when execution starts", () => {
     const pending = createStage();
     const ready = transitionStageState(pending, {

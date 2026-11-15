@@ -2,29 +2,34 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import {
+  lstat,
   mkdir,
   readFile,
   realpath,
   rename,
   writeFile,
 } from "node:fs/promises";
-import { basename, dirname, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
 import {
   FileStateStore,
   WorkflowRunService,
+  Ed25519ApprovalAuthorizer,
   getAetherVersion,
   planReadyStageTasks,
   verifyTaskResult,
   searchProjectContext,
   auditProjectDocumentation,
 } from "@aether/core";
-import type { StageTaskContract, TaskResultSubmission } from "@aether/core";
+import type { ApprovalDecisionReceipt } from "@aether/core";
+import type { StageTaskContract, TaskResultSubmission, TrustedApproverStore } from "@aether/core";
 import { createAgentAdapter, runAgentCommand } from "@aether/adapters";
 import { inspectAgentPlatforms } from "./commands/platform-info.js";
 import {
   validateAgentAdapterDescriptor,
   validateDelegationContract,
   validateTaskResultSubmission,
+  validateApprovalDecisionReceipt,
+  validateTrustedApproverStore,
 } from "@aether/schemas";
 import type { AdapterId } from "@aether/adapters";
 import {
@@ -71,6 +76,12 @@ Commands:
                                                Launch one interactive agent CLI stage
   workflow accept <run-id> --file <file> --stage <id> --result <json>
                                                Verify task result and complete its stage
+  workflow request-approval <run-id> --file <file> --stage <id> --by <name>
+                                               Request approval for an eligible stage
+  workflow approve <run-id> --file <file> --stage <id> --receipt <json>
+                                               Apply a cryptographically verified approval receipt
+  workflow reject <run-id> --file <file> --stage <id> --receipt <json>
+                                               Apply a cryptographically verified rejection receipt
   workflow pause <run-id>                     Pause a running workflow
   workflow resume <run-id> --file <file>       Recover if needed, then resume a paused workflow
   workflow recover <run-id> --file <file>      Replay pending events and reconcile run state
@@ -95,13 +106,32 @@ Input values use YAML scalar syntax:
 `);
 }
 
-function createRunService(projectId?: string): WorkflowRunService {
+function createRunService(projectId?: string, approvalAuthorizer?: Ed25519ApprovalAuthorizer): WorkflowRunService {
   return new WorkflowRunService({
     projectRoot: process.cwd(),
     projectId: projectId ?? basename(resolve(process.cwd())),
+    ...(approvalAuthorizer === undefined ? {} : { approvalAuthorizer }),
   });
 }
 
+async function loadTrustedApprovalAuthorizer(): Promise<Ed25519ApprovalAuthorizer> {
+  const configuredPath = process.env.AETHER_TRUSTED_APPROVERS_FILE;
+  if (!configuredPath) throw new Error("AETHER_TRUSTED_APPROVERS_FILE must point to an externally managed trusted approver registry.");
+  if (!isAbsolute(configuredPath)) throw new Error("AETHER_TRUSTED_APPROVERS_FILE must be an absolute path.");
+  const projectRoot = await realpath(process.cwd());
+  const candidate = resolve(configuredPath);
+  const details = await lstat(candidate);
+  if (details.isSymbolicLink() || !details.isFile()) throw new Error("Trusted approver registry must be a regular, non-symlink file.");
+  if (process.platform !== "win32" && (details.mode & 0o022) !== 0) throw new Error("Trusted approver registry must not be group- or world-writable.");
+  const trustedPath = await realpath(candidate);
+  if (isInside(projectRoot, trustedPath)) throw new Error("Trusted approver registry must live outside the project workspace.");
+  const parsed = JSON.parse(await readFile(trustedPath, "utf8")) as unknown;
+  const validation = validateTrustedApproverStore(parsed);
+  if (!validation.valid) {
+    throw new Error("Trusted approver registry is invalid:\n- " + validation.errors.map((issue) => issue.path + ": " + issue.message).join("\n- "));
+  }
+  return new Ed25519ApprovalAuthorizer(parsed as TrustedApproverStore);
+}
 function loadWorkflowFile(path: string) {
   return readFile(path, "utf8").then((content) => {
     const result = parseWorkflowDefinition(content);
@@ -209,6 +239,7 @@ function printRun(snapshot: {
     status: string;
     attempt: number;
     verification?: { evidence_count: number };
+    approval_id?: string;
   }>;
 }): void {
   console.log("Run: " + snapshot.id);
@@ -219,9 +250,10 @@ function printRun(snapshot: {
     const evidence = stage.verification
       ? " | evidence " + stage.verification.evidence_count
       : "";
+    const approval = stage.approval_id ? " | approval " + stage.approval_id : "";
     console.log(
       "  " + stage.stage_id.padEnd(24) + stage.status.padEnd(22) +
-      "attempt " + stage.attempt + evidence,
+      "attempt " + stage.attempt + evidence + approval,
     );
   }
 }
@@ -598,6 +630,44 @@ async function acceptWorkflowTask(
   return 0;
 }
 
+async function runWorkflowApprovalCommand(
+  runId: string,
+  args: string[],
+  action: "request" | "approve" | "reject",
+): Promise<number> {
+  const options = parseOptions(
+    args,
+    action === "request" ? ["--file", "--stage", "--by"] : ["--file", "--stage", "--receipt"],
+  );
+  const filePath = options["--file"];
+  const stageId = options["--stage"];
+  const requesterLabel = options["--by"];
+  const receiptPath = options["--receipt"];
+  if (!filePath || !stageId) throw new Error("Missing --file or --stage for workflow approval command.");
+  if (action === "request" && !requesterLabel?.trim()) throw new Error("workflow request-approval requires --by <requester-audit-label>. This label is not authenticated.");
+  if (action !== "request" && !receiptPath) throw new Error("Approval decisions require --receipt <signed-decision.json>; --by is not accepted.");
+  const workflow = await loadWorkflowFile(filePath);
+  let snapshot;
+  if (action === "request") {
+    snapshot = await createRunService().requestStageApproval(runId, workflow, stageId, requesterLabel!);
+  } else {
+    const parsed = JSON.parse(await readFile(receiptPath!, "utf8")) as unknown;
+    const validation = validateApprovalDecisionReceipt(parsed);
+    if (!validation.valid) {
+      throw new Error("Approval decision receipt is invalid:\n- " + validation.errors.map((issue) => issue.path + ": " + issue.message).join("\n- "));
+    }
+    const service = createRunService(undefined, await loadTrustedApprovalAuthorizer());
+    const receipt = parsed as ApprovalDecisionReceipt;
+    snapshot = action === "approve"
+      ? await service.approveStage(runId, workflow, stageId, receipt)
+      : await service.rejectStage(runId, workflow, stageId, receipt);
+  }
+  printRun(snapshot);
+  if (action === "request") console.log("Approval request recorded. The --by value is an audit label only.");
+  if (action === "approve") console.log("Signed approval receipt verified; the stage is ready for handoff.");
+  if (action === "reject") console.log("Signed rejection receipt verified; the stage is blocked until revised and re-requested.");
+  return 0;
+}
 async function runWorkflowCommand(args: string[]): Promise<number> {
   const [subcommand, resource, ...options] = args;
 
@@ -661,7 +731,17 @@ async function runWorkflowCommand(args: string[]): Promise<number> {
     printRun(started);
     console.log("");
     console.log("Run state: .aether/runs/" + started.id);
-    console.log("Next: aether workflow handoff " + started.id + " --file " + resource);
+    const approvalStage = Object.values(started.stages).find(
+      (stage) => stage.status === "awaiting_approval",
+    );
+    if (approvalStage) {
+      console.log(
+        "Next: aether workflow approve " + started.id + " --file " + resource +
+          " --stage " + approvalStage.stage_id + " --receipt <signed-receipt.json>",
+      );
+    } else {
+      console.log("Next: aether workflow handoff " + started.id + " --file " + resource);
+    }
     return 0;
   }
 
@@ -697,6 +777,16 @@ async function runWorkflowCommand(args: string[]): Promise<number> {
     return acceptWorkflowTask(resource, options);
   }
 
+  if (subcommand === "request-approval") {
+    if (!resource) throw new Error("Usage: aether workflow request-approval <run-id> --file <workflow-file> --stage <id> --by <name>");
+    return runWorkflowApprovalCommand(resource, options, "request");
+  }
+
+  if (subcommand === "approve" || subcommand === "reject") {
+    if (!resource) throw new Error("Usage: aether workflow " + subcommand + " <run-id> --file <workflow-file> --stage <id> --receipt <signed-decision.json>");
+    return runWorkflowApprovalCommand(resource, options, subcommand);
+  }
+
   if (subcommand === "pause") {
     if (!resource) throw new Error("Usage: aether workflow pause <run-id>");
     if (options.length > 0) throw new Error("workflow pause does not accept additional options.");
@@ -712,7 +802,10 @@ async function runWorkflowCommand(args: string[]): Promise<number> {
     const filePath = parseOptions(options, ["--file"])["--file"];
     if (!filePath) throw new Error("Missing --file <workflow-file>.");
     const workflow = await loadWorkflowFile(filePath);
-    const service = createRunService();
+    const approvalAuthorizer = process.env.AETHER_TRUSTED_APPROVERS_FILE
+      ? await loadTrustedApprovalAuthorizer()
+      : undefined;
+    const service = createRunService(undefined, approvalAuthorizer);
 
     if (subcommand === "recover") {
       const snapshot = await service.recoverRun(resource, workflow);

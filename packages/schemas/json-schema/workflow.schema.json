@@ -267,8 +267,27 @@
                 "optional",
                 "required"
               ]
+            },
+            "risk": {
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            },
+            "required_roles": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "common.schema.json#/$defs/identifier"
+              }
             }
-          }
+          },
+          "required": [
+            "mode"
+          ]
         },
         "scope": {
           "type": "object",

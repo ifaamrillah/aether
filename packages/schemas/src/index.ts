@@ -55,7 +55,9 @@ export type ContractSchemaName =
   | "project-config"
   | "adapter"
   | "delegation"
-  | "task-result";
+  | "task-result"
+  | "approval-decision"
+  | "trusted-approvers";
 
 function loadSchema(name: string): object {
   const fileUrl = new URL("../json-schema/" + name + ".schema.json", import.meta.url);
@@ -76,11 +78,22 @@ const schemaNames: ContractSchemaName[] = [
   "adapter",
   "delegation",
   "task-result",
+  "approval-decision",
+  "trusted-approvers",
 ];
+
+const loadedSchemas = new Map<ContractSchemaName, object>();
+for (const name of schemaNames) {
+  const schema = loadSchema(name);
+  ajv.addSchema(schema);
+  loadedSchemas.set(name, schema);
+}
 
 const validators = new Map<ContractSchemaName, CompiledValidator>();
 for (const name of schemaNames) {
-  validators.set(name, ajv.compile(loadSchema(name)));
+  const schema = loadedSchemas.get(name);
+  if (!schema) throw new Error('Unable to load canonical schema "' + name + '".');
+  validators.set(name, ajv.compile(schema));
 }
 
 export function validateAetherContract(
@@ -138,4 +151,12 @@ export function validateWorkflowRunSnapshot(
   value: unknown,
 ): SchemaValidationResult {
   return validateAetherContract("run", value);
+}
+
+export function validateApprovalDecisionReceipt(value: unknown): SchemaValidationResult {
+  return validateAetherContract("approval-decision", value);
+}
+
+export function validateTrustedApproverStore(value: unknown): SchemaValidationResult {
+  return validateAetherContract("trusted-approvers", value);
 }

@@ -29,6 +29,11 @@ export interface WorkflowStageDefinition {
   description?: string;
   depends_on?: string[];
   condition?: WorkflowConditionDefinition;
+  approval?: {
+    mode: "none" | "optional" | "required";
+    risk?: "low" | "medium" | "high" | "critical";
+    required_roles?: string[];
+  };
   scope?: {
     read_paths?: string[];
     write_paths?: string[];
