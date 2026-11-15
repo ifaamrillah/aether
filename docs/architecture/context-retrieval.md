@@ -47,3 +47,15 @@ Context search is intended for trusted project workspaces. A future iteration ca
 ## Workflow handoff integration
 
 When the CLI prepares a task handoff or launches an interactive agent stage, it searches the local project using the task title, objective, and acceptance criteria. It writes up to five ranked excerpts (3,500 characters total, 500 candidate files, 4 MiB scanned) to `.aether/handoffs/<run-id>/<stage-id>/CONTEXT.md` and adds a reference to that file in `HANDOFF.md`. The generated context pack is informational: source paths and line numbers are included, and agents must inspect current files before making changes. It is not acceptance evidence and does not change the declared task file scope.
+## Documentation integrity audit
+
+Run a deterministic audit of local Markdown links and heading anchors:
+
+```bash
+aether docs audit
+aether docs audit --project ../service --max-files 3000
+```
+
+The command shares the bounded, symlink-safe, `.gitignore`-aware Markdown walker used by context retrieval. It resolves relative and project-root paths, `.md`/`.mdx` extensionless routes, and conventional README/index documents; it checks common Markdown heading slugs, duplicate heading suffixes, explicit `{#id}` anchors, and HTML `id`/`name` values. Fenced and inline code examples are ignored. External schemes and protocol-relative URLs are not fetched. The scan fails when an internal target or supported anchor is missing, or when resource bounds truncate the scan.
+
+This is structural link validation, not semantic documentation drift detection. It does not verify that prose matches the current implementation, inspect every Markdown extension, or test remote links. Heading slug rules cover common GitHub-style cases rather than every renderer-specific extension.
