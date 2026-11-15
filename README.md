@@ -76,7 +76,7 @@ node apps/cli/dist/index.js workflow run workflows/aether/feature.yaml \
   --input 'feature_description=Add account settings'
 ```
 
-The CLI persists run state under `.aether/runs/`. It also prepares portable task handoffs for ready stages and verifies agent-submitted results before a stage can complete.
+The CLI persists run state under `.aether/runs/`. For each ready stage, it prepares a portable task handoff plus a bounded `CONTEXT.md` pack of relevant local source/documentation excerpts. The handoff links that context file. Aether verifies agent-submitted results before a stage can complete.
 
 Prepare handoffs for a run:
 
