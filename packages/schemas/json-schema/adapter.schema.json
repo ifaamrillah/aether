@@ -10,6 +10,7 @@
     "name",
     "adapter_version",
     "handoff_mode",
+    "execution_mode",
     "supported_skill_format",
     "capabilities",
     "project_markers",
@@ -39,6 +40,9 @@
     },
     "handoff_mode": {
       "const": "human-mediated"
+    },
+    "execution_mode": {
+      "enum": ["handoff-only", "interactive-cli"]
     },
     "supported_skill_format": {
       "type": "array",

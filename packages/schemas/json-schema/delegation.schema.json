@@ -32,7 +32,7 @@
     "title": { "type": "string", "minLength": 1 },
     "objective": { "type": "string", "minLength": 1 },
     "suggested_role": { "type": "string", "minLength": 1 },
-    "adapter_id": { "type": "string", "enum": ["generic", "claude-code", "codex", "opencode"] },
+    "adapter_id": { "type": "string", "enum": ["generic", "claude-code", "codex", "opencode", "gemini-cli", "antigravity"] },
     "dependencies": {
       "type": "array",
       "items": { "$ref": "common.schema.json#/$defs/identifier" },

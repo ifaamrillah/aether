@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { inspectAgentPlatforms, isAdapterId } from "./platform-info.js";
+import { validateAgentAdapterDescriptor } from "@aether/schemas";
 
 let projectRoot: string;
 
@@ -29,6 +30,18 @@ describe("inspectAgentPlatforms", () => {
     const claude = result.find((item) => item.descriptor.id === "claude-code")!;
     expect(claude.descriptor.capabilities.find((capability) => capability.id === "native_subagents")?.status)
       .toBe("unsupported");
+  });
+
+
+  it("keeps every adapter descriptor aligned with the canonical adapter schema", async () => {
+    const result = await inspectAgentPlatforms(projectRoot);
+    for (const platform of result) {
+      const validation = validateAgentAdapterDescriptor(platform.descriptor);
+      expect(
+        validation.valid,
+        platform.descriptor.id + ": " + validation.errors.map((issue) => issue.message).join("; "),
+      ).toBe(true);
+    }
   });
 
   it("reports the portable handoff option even without platform markers", async () => {

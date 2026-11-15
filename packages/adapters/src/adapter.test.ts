@@ -94,4 +94,36 @@ describe("agent adapters", () => {
     expect(rendered).toContain('"schema_version": 1');
     expect(rendered).toContain("not an OS sandbox");
   });
+  it("builds interactive launch commands without bypassing platform permissions", () => {
+    const handoffPath = ".aether/handoffs/run_123/implementation/HANDOFF.md";
+    const taskFor = (adapterId: "claude-code" | "codex" | "gemini-cli" | "antigravity" | "generic" | "opencode") => ({
+      ...task,
+      adapter_id: adapterId,
+    });
+
+    const claude = createAgentAdapter("claude-code").buildLaunch(taskFor("claude-code"), handoffPath);
+    expect(claude?.command).toBe("claude");
+    expect(claude?.args).toContain("--permission-mode");
+    expect(claude?.args).toContain("default");
+    expect(claude?.args.join(" ")).not.toContain("dangerously-skip-permissions");
+
+    const codex = createAgentAdapter("codex").buildLaunch(taskFor("codex"), handoffPath);
+    expect(codex?.command).toBe("codex");
+    expect(codex?.args).toContain("workspace-write");
+    expect(codex?.args).toContain("on-request");
+    expect(codex?.args.join(" ")).not.toContain("--yolo");
+
+    const gemini = createAgentAdapter("gemini-cli").buildLaunch(taskFor("gemini-cli"), handoffPath);
+    expect(gemini?.command).toBe("gemini");
+    expect(gemini?.args[0]).toBe("--prompt-interactive");
+
+    const antigravity = createAgentAdapter("antigravity").buildLaunch(taskFor("antigravity"), handoffPath);
+    expect(antigravity?.command).toBe("agy");
+    expect(antigravity?.args).toContain("--sandbox");
+    expect(antigravity?.args[0]).toBe("-i");
+
+    expect(createAgentAdapter("generic").buildLaunch(taskFor("generic"), handoffPath)).toBeUndefined();
+    expect(createAgentAdapter("opencode").buildLaunch(taskFor("opencode"), handoffPath)).toBeUndefined();
+  });
+
 });

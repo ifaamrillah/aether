@@ -13,14 +13,28 @@ const LIMITATION = [
   "It does not launch a platform agent, grant permissions, or enforce filesystem boundaries.",
 ];
 
-function capabilities(): CapabilityDescriptor[] {
+function supportsInteractiveExecution(id: AdapterId): boolean {
+  return id === "claude-code" ||
+    id === "codex" ||
+    id === "gemini-cli" ||
+    id === "antigravity";
+}
+
+function capabilities(id: AdapterId): CapabilityDescriptor[] {
   return [
     { id: "agent_handoff", status: "supported" },
     { id: "portable_skills", status: "supported" },
     {
+      id: "interactive_execution",
+      status: supportsInteractiveExecution(id) ? "supported" : "unsupported",
+      limitations: supportsInteractiveExecution(id)
+        ? ["Aether launches the platform CLI with the task handoff as its initial prompt; the platform retains its normal interactive permission flow."]
+        : ["Use the generated handoff through the platform's native interface."],
+    },
+    {
       id: "native_subagents",
       status: "unsupported",
-      limitations: [...LIMITATION, "Delegate the prepared task manually through the platform's native interface."],
+      limitations: [...LIMITATION, "Aether does not dispatch native subagents or parallel workers yet."],
     },
     {
       id: "parallel_execution",
@@ -45,8 +59,9 @@ function descriptor(id: AdapterId): AdapterDescriptor {
     schema_version: 1 as const,
     adapter_version: "0.1.0",
     handoff_mode: "human-mediated" as const,
+    execution_mode: supportsInteractiveExecution(id) ? "interactive-cli" as const : "handoff-only" as const,
     supported_skill_format: ["agentskills"],
-    capabilities: capabilities(),
+    capabilities: capabilities(id),
   };
 
   switch (id) {
@@ -150,6 +165,65 @@ export function createAgentAdapter(id: AdapterId): AgentAdapter {
         if (await exists(join(projectRoot, marker))) return true;
       }
       return false;
+    },
+
+    buildLaunch(task: StageTaskContract, handoffPath: string) {
+      const prompt = [
+        "Read and follow the Aether task handoff at " + handoffPath + ".",
+        "Treat that file as the task contract and follow its file scope, acceptance criteria, and result-file requirements.",
+        "Work in the current project directory. Do not bypass or disable the platform's permission prompts.",
+        "Do not deploy, publish, delete important data, or change credentials or permissions.",
+      ].join("\n");
+
+      switch (id) {
+        case "claude-code":
+          return {
+            adapter_id: id,
+            command: "claude",
+            args: ["--permission-mode", "default", prompt],
+            permission_notes: [
+              "Claude Code runs in its normal default permission mode.",
+              "Review and approve tool actions in the Claude Code interface.",
+            ],
+          };
+        case "codex":
+          return {
+            adapter_id: id,
+            command: "codex",
+            args: [
+              "--sandbox", "workspace-write",
+              "--ask-for-approval", "on-request",
+              prompt,
+            ],
+            permission_notes: [
+              "Codex is restricted to its workspace-write sandbox.",
+              "Out-of-sandbox or otherwise approval-gated actions remain subject to on-request approval.",
+            ],
+          };
+        case "gemini-cli":
+          return {
+            adapter_id: id,
+            command: "gemini",
+            args: ["--prompt-interactive", prompt],
+            permission_notes: [
+              "Gemini CLI starts an interactive session with the Aether handoff as its initial prompt.",
+              "Keep the CLI's configured approval mode; do not use --yolo.",
+            ],
+          };
+        case "antigravity":
+          return {
+            adapter_id: id,
+            command: "agy",
+            args: ["-i", prompt, "--sandbox"],
+            permission_notes: [
+              "Antigravity starts an interactive session with terminal sandbox restrictions enabled.",
+              "Do not use --dangerously-skip-permissions.",
+            ],
+          };
+        case "generic":
+        case "opencode":
+          return undefined;
+      }
     },
 
     renderHandoff(task: StageTaskContract): string {
