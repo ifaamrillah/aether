@@ -51,7 +51,7 @@ The service computes the transitive dependency closure of `completion.required_s
 
 - Recovery supports the run and stage event types currently emitted by this service.
 - A hard crash may leave a stale lock; automatic stale-lock reclamation is not implemented.
-- Conditional stage evaluation and optional dependency skip policies are not implemented.
+- Conditional stage conditions are evaluated after dependencies complete; false conditions produce a `skipped` stage. General optional dependency skip policies beyond explicit stage conditions are not implemented.
 - Native agent invocation and parallel dispatch are not implemented by the current adapters.
 - Evidence hashes do not establish the semantic truth of agent-submitted reports.
 - No production deployment, rollback, or external approval engine is included in this milestone.
