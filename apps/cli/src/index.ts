@@ -16,6 +16,7 @@ import {
   planReadyStageTasks,
   verifyTaskResult,
   searchProjectContext,
+  auditProjectDocumentation,
 } from "@aether/core";
 import type { StageTaskContract, TaskResultSubmission } from "@aether/core";
 import { createAgentAdapter, runAgentCommand } from "@aether/adapters";
@@ -59,6 +60,8 @@ Commands:
   skill validate [path]                        Validate portable Agent Skills (default: skills/)
   context search <query> [--limit <n>] [--max-chars <n>] [--project <path>]
                                                Retrieve bounded local project context
+  docs audit [--project <path>] [--max-files <n>]
+                                               Check local Markdown links and heading anchors
   platform list                                List adapter capabilities and skill paths
   platform detect [--project <path>]           Detect platform markers in a project
   workflow run <file> [--input name=value]     Create and start a workflow run
@@ -809,6 +812,49 @@ async function runContextCommand(args: string[]): Promise<number> {
   return 0;
 }
 
+async function runDocumentationCommand(args: string[]): Promise<number> {
+  const [subcommand, ...values] = args;
+  if (subcommand !== "audit") {
+    throw new Error("Usage: aether docs audit [--project <path>] [--max-files <n>]");
+  }
+
+  const options = parseOptions(values, ["--project", "--max-files"]);
+  const projectRoot = resolve(options["--project"] ?? process.cwd());
+  const maxFiles = parsePositiveIntegerOption(options["--max-files"], "--max-files");
+  const result = await auditProjectDocumentation({
+    projectRoot,
+    ...(maxFiles === undefined ? {} : { maxFiles }),
+  });
+
+  console.log(
+    "Checked " + result.filesChecked + " Markdown file(s) and " +
+      result.linksChecked + " local link(s).",
+  );
+  if (result.filesSkipped > 0) {
+    console.log("Skipped " + result.filesSkipped + " unreadable or unsafe file(s).");
+  }
+  if (result.truncated) {
+    console.error("Documentation audit was truncated by its resource limits.");
+  }
+
+  for (const link of result.brokenLinks) {
+    console.error(
+      link.sourcePath + ":" + link.line + ": " + link.href + " - " + link.reason +
+        (link.targetPath ? " (" + link.targetPath + ")" : ""),
+    );
+  }
+
+  if (result.brokenLinks.length > 0 || result.truncated) {
+    console.error(
+      result.brokenLinks.length + " broken local link or anchor reference(s) found.",
+    );
+    return 1;
+  }
+
+  console.log("No broken internal links found.");
+  return 0;
+}
+
 async function runPlatformCommand(args: string[]): Promise<number> {
   const [subcommand, ...options] = args;
 
@@ -1130,6 +1176,15 @@ async function main(args: string[]): Promise<number> {
       return await runSkillCommand(rest);
     } catch (error) {
       console.error(error instanceof Error ? error.message : "Skill command failed.");
+      return 1;
+    }
+  }
+
+  if (command === "docs") {
+    try {
+      return await runDocumentationCommand(rest);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Documentation audit failed.");
       return 1;
     }
   }
