@@ -2,7 +2,7 @@
 
 ## Lifecycle commands
 
-The initial CLI exposes the persisted run lifecycle:
+The CLI exposes persisted run lifecycle and stage delegation commands:
 
 ```bash
 aether workflow run workflows/feature.yaml --input 'feature_description=Build account settings'
@@ -11,6 +11,9 @@ aether workflow pause <run-id>
 aether workflow resume <run-id> --file workflows/feature.yaml
 aether workflow recover <run-id> --file workflows/feature.yaml
 aether workflow cancel <run-id>
+aether workflow handoff <run-id> --file workflows/feature.yaml --adapter generic
+aether workflow launch <run-id> --file workflows/feature.yaml --adapter codex --stage discovery
+aether workflow accept <run-id> --file workflows/feature.yaml --stage discovery --result .aether/handoffs/<run-id>/discovery/result.json
 ```
 
 Input values after `--input` use YAML scalar parsing, so strings, booleans, numbers, arrays, and objects are converted before Core validates them against the workflow input definitions.
@@ -26,7 +29,7 @@ The project ID defaults to the current working directory name. `--project-id` ca
 - `recover` replays pending supported events but does not automatically change a paused run to running.
 - `cancel` makes a non-terminal run terminal.
 
-The CLI does not execute platform agents yet. It prepares and persists eligible stage states; native delegation adapters will be connected in a later milestone.
+The CLI can prepare portable handoffs for every adapter and launch one selected interactive host CLI session for Claude Code, Codex, Gemini CLI, or Antigravity. Launch is explicitly operator-initiated with `workflow launch`; `workflow handoff` only prepares artifacts. Generic and OpenCode remain handoff-only. Each prepared stage includes `task.json`, `HANDOFF.md`, and a bounded `CONTEXT.md` retrieved from local project files. A successful agent process exit does not complete a stage: the operator must inspect its result and evidence, then run `workflow accept`. Native subagent dispatch and parallel worker orchestration remain unsupported.
 
 ## Recovery algorithm
 
