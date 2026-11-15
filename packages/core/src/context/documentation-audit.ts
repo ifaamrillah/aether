@@ -116,10 +116,36 @@ function maskMarkdownCode(content: string): string {
   }
 
   const withoutFences = masked.join("");
-  const inlineCode = /`+[sS]*?`+/g;
-  let match: RegExpExecArray | null;
-  while ((match = inlineCode.exec(withoutFences)) !== null) {
-    maskRange(match.index, match.index + match[0].length);
+  const delimiter = String.fromCharCode(96);
+  let cursor = 0;
+  while (cursor < withoutFences.length) {
+    if (withoutFences[cursor] !== delimiter) {
+      cursor += 1;
+      continue;
+    }
+
+    const openingStart = cursor;
+    while (withoutFences[cursor] === delimiter) cursor += 1;
+    const delimiterLength = cursor - openingStart;
+    let closingStart = cursor;
+    let closingEnd = -1;
+
+    while (closingStart < withoutFences.length) {
+      const nextDelimiter = withoutFences.indexOf(delimiter, closingStart);
+      if (nextDelimiter < 0) break;
+      let runEnd = nextDelimiter;
+      while (withoutFences[runEnd] === delimiter) runEnd += 1;
+      if (runEnd - nextDelimiter === delimiterLength) {
+        closingEnd = runEnd;
+        break;
+      }
+      closingStart = runEnd;
+    }
+
+    if (closingEnd >= 0) {
+      maskRange(openingStart, closingEnd);
+      cursor = closingEnd;
+    }
   }
   return masked.join("");
 }
