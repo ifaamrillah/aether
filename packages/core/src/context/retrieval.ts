@@ -1,5 +1,5 @@
 import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
-import { extname, relative, resolve, sep } from "node:path";
+import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 
 export interface ProjectContextSearchOptions {
   projectRoot: string;
@@ -122,9 +122,7 @@ function isWithinRoot(root: string, candidate: string): boolean {
   return path === "" || (
     !path.startsWith(".." + sep) &&
     path !== ".." &&
-    !path.startsWith("..") &&
-    !path.startsWith(sep) &&
-    !/^[A-Za-z]:/.test(path)
+    !isAbsolute(path)
   );
 }
 
