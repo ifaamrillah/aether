@@ -110,7 +110,7 @@ describe("canonical JSON Schemas", () => {
     })).toBe(false);
   });
 
-  it("validates adapter capability descriptors without claiming native execution", () => {
+  it("validates adapter execution modes without claiming native subagent execution", () => {
     const ajv = new Ajv2020({ allErrors: true, strict: false });
     addFormats(ajv);
     for (const schema of schemas) ajv.addSchema(schema);
@@ -126,11 +126,13 @@ describe("canonical JSON Schemas", () => {
       name: "Generic Agent Handoff",
       adapter_version: "0.1.0",
       handoff_mode: "human-mediated",
+      execution_mode: "handoff-only",
       supported_skill_format: ["agentskills"],
       project_markers: [],
       skill_install_path: ".agents/skills",
       capabilities: [
         { id: "agent_handoff", status: "supported" },
+        { id: "interactive_execution", status: "unsupported" },
         { id: "native_subagents", status: "unsupported" }
       ]
     })).toBe(true);
