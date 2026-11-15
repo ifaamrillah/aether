@@ -67,6 +67,13 @@ jobs:
           echo "$output"
           printf '%s\n' "$output" | grep -q 'docs/architecture/workflow-recovery.md'
 
+      - name: Smoke test documentation link audit
+        shell: bash
+        run: |
+          output="$(node apps/cli/dist/index.js docs audit)"
+          echo "$output"
+          printf '%s\n' "$output" | grep -q 'No broken internal links found.'
+
       - name: Smoke test project initialization and doctor
         shell: bash
         run: |
