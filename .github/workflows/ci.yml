@@ -139,3 +139,71 @@ jobs:
           node apps/cli/dist/index.js workflow resume "$run_id" --file workflows/feature.yaml
           node apps/cli/dist/index.js workflow cancel "$run_id"
 
+      - name: Smoke test workflow approval gates
+        shell: bash
+        run: |
+          approval_workflow="$RUNNER_TEMP/aether-approval-workflow.yaml"
+          cat > "$approval_workflow" <<'YAML'
+          schema_version: 1
+          id: ci-approval-gate
+          version: 1
+          name: CI Approval Gate
+          description: Exercise a required approval gate.
+          inputs: []
+          stages:
+            - id: protected-change
+              skill: implementation
+              required: true
+              approval:
+                mode: required
+                risk: high
+          completion:
+            required_stages:
+              - protected-change
+          YAML
+          output="$(node apps/cli/dist/index.js workflow run "$approval_workflow")"
+          echo "$output"
+          approval_run_id="$(printf "%s\n" "$output" | sed -n "s/^Run: //p" | head -n 1)"
+          test -n "$approval_run_id"
+          printf "%s\n" "$output" | grep -q "awaiting_approval"
+          if node apps/cli/dist/index.js workflow approve "$approval_run_id" --file "$approval_workflow" --stage protected-change --by forged-user; then
+            echo "Unsigned --by approval unexpectedly succeeded."
+            exit 1
+          fi
+          trusted_file="$RUNNER_TEMP/aether-trusted-approvers.json"
+          receipt_file="$RUNNER_TEMP/aether-approval-receipt.json"
+          AETHER_TEST_RUN_ID="$approval_run_id" AETHER_TEST_TRUSTED_FILE="$trusted_file" AETHER_TEST_RECEIPT_FILE="$receipt_file" node --input-type=module <<'NODE'
+          import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+          import { generateKeyPairSync, sign } from "node:crypto";
+          import { canonicalizeApprovalDecision } from "./packages/core/dist/index.js";
+          const runId = process.env.AETHER_TEST_RUN_ID;
+          const events = readFileSync(`.aether/runs/${runId}/events.jsonl`, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+          const request = events.find((event) => event.type === "stage.transitioned" && event.payload.to === "awaiting_approval");
+          if (!request?.payload.approval) throw new Error("Approval request event was not found.");
+          const pair = generateKeyPairSync("ed25519");
+          const unsigned = {
+            schema_version: 1,
+            approval_id: request.payload.approval.id,
+            action_digest: request.payload.approval.action_digest,
+            decision: "approved",
+            issuer: "https://ci.aether.dev",
+            subject: "ci-maintainer",
+            key_id: "ci-maintainer",
+            issued_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+            reason: "CI approval-gate smoke test",
+          };
+          const receipt = { ...unsigned, signature: sign(null, Buffer.from(canonicalizeApprovalDecision(unsigned)), pair.privateKey).toString("base64url") };
+          const trustStore = { schema_version: 1, keys: [{
+            key_id: "ci-maintainer", issuer: "https://ci.aether.dev", subject: "ci-maintainer",
+            algorithm: "Ed25519", public_key_pem: pair.publicKey.export({ type: "spki", format: "pem" }).toString(),
+            roles: ["approver"], status: "active",
+          }] };
+          writeFileSync(process.env.AETHER_TEST_TRUSTED_FILE, JSON.stringify(trustStore, null, 2), { mode: 0o600 });
+          chmodSync(process.env.AETHER_TEST_TRUSTED_FILE, 0o600);
+          writeFileSync(process.env.AETHER_TEST_RECEIPT_FILE, JSON.stringify(receipt, null, 2), { mode: 0o600 });
+          NODE
+          AETHER_TRUSTED_APPROVERS_FILE="$trusted_file" node apps/cli/dist/index.js workflow approve "$approval_run_id" --file "$approval_workflow" --stage protected-change --receipt "$receipt_file"
+          status="$(node apps/cli/dist/index.js workflow status "$approval_run_id")"
+          echo "$status"
+          printf "%s\n" "$status" | grep -q "protected-change.*ready"

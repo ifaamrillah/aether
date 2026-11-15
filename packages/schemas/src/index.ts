@@ -55,7 +55,9 @@ export type ContractSchemaName =
   | "project-config"
   | "adapter"
   | "delegation"
-  | "task-result";
+  | "task-result"
+  | "approval-decision"
+  | "trusted-approvers";
 
 function loadSchema(name: string): object {
   const fileUrl = new URL("../json-schema/" + name + ".schema.json", import.meta.url);
@@ -76,6 +78,8 @@ const schemaNames: ContractSchemaName[] = [
   "adapter",
   "delegation",
   "task-result",
+  "approval-decision",
+  "trusted-approvers",
 ];
 
 const validators = new Map<ContractSchemaName, CompiledValidator>();
@@ -138,4 +142,12 @@ export function validateWorkflowRunSnapshot(
   value: unknown,
 ): SchemaValidationResult {
   return validateAetherContract("run", value);
+}
+
+export function validateApprovalDecisionReceipt(value: unknown): SchemaValidationResult {
+  return validateAetherContract("approval-decision", value);
+}
+
+export function validateTrustedApproverStore(value: unknown): SchemaValidationResult {
+  return validateAetherContract("trusted-approvers", value);
 }

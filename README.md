@@ -155,6 +155,44 @@ The adapter registry also declares each host's skill discovery directory. Curren
 
 These paths follow the platforms' documented project-level skill discovery conventions: [Claude Code](https://code.claude.com/docs/en/skills), [Codex](https://developers.openai.com/codex/skills), [OpenCode](https://opencode.ai/docs/skills/), [Gemini CLI](https://geminicli.com/docs/cli/skills/), and [Antigravity](https://antigravity.google/docs/skills).
 
+## Trusted human approval gates
+
+Stages can require an explicit decision before an agent receives a handoff:
+
+```yaml
+stages:
+  - id: protected-change
+    skill: implementation
+    required: true
+    approval:
+      mode: required
+      risk: high
+      required_roles: ["release-manager"]
+```
+
+Required stages pause at `awaiting_approval`. Optional gates can be requested after a stage becomes ready:
+
+```bash
+aether workflow request-approval <run-id> --file workflows/feature.yaml --stage protected-change --by "change-author-audit-label"
+```
+
+The `--by` value is an audit label only; it is not authenticated. A stage decision must use a detached Ed25519-signed receipt and a trusted approver registry managed outside the workspace:
+
+```bash
+AETHER_TRUSTED_APPROVERS_FILE=/secure/aether/trusted-approvers.json \
+  aether workflow approve <run-id> --file workflows/feature.yaml --stage protected-change --receipt /secure/receipts/approval.json
+
+AETHER_TRUSTED_APPROVERS_FILE=/secure/aether/trusted-approvers.json \
+  aether workflow reject <run-id> --file workflows/feature.yaml --stage protected-change --receipt /secure/receipts/rejection.json
+```
+
+The registry maps an Ed25519 public key to an issuer, subject, and roles. Required roles default to `approver` and can be overridden per stage with `required_roles`. Role grants come from the protected registry, never from the receipt. Receipt signatures bind the approval ID and action digest; receipts expire within 15 minutes and allow at most 60 seconds of clock skew.
+
+The pending approval and its action digest are recorded in `.aether/runs/<run-id>/events.jsonl`. An external identity/approval service authenticates the reviewer, checks their role, signs the decision payload, and returns the receipt. Keep private keys in an identity service, HSM, or secret manager—not in the repository or project.
+
+Requester labels are not authenticated yet, so Aether does not claim separation of duties. Quorum approval, OIDC integration, a hosted policy service, and OS-level enforcement are also not implemented. Approval decisions gate Aether workflow progression only; they do not authorize deployments or grant credentials.
+
+See [Approval gates](docs/architecture/approval-gates.md) for the registry, receipt format, signing contract, and trust boundaries.
 ## UI design workflow
 
 For a UI change that needs explicit design work before engineering specification, use the dedicated UI Improvement workflow. Validate and run workflows/ui-improvement.yaml with the desired UI change as the ui_change input.
