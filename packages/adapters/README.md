@@ -6,20 +6,21 @@ The project installer consumes `skill_install_path` from the adapter descriptor.
 
 ## Current adapters
 
-| Adapter | Detection marker | Skill discovery directory | Current handoff mode |
+| Adapter | Detection marker | Skill discovery directory | Execution mode |
 |---|---|---|---|
-| generic | Always available | `.agents/skills/` | Human-mediated |
-| Claude Code | `.claude/` | `.claude/skills/` | Human-mediated |
-| Codex | `.agents/` or `.codex/` | `.agents/skills/` | Human-mediated |
-| OpenCode | `.opencode/` | `.opencode/skills/` | Human-mediated |
-| Gemini CLI | `.gemini/` or `GEMINI.md` | `.gemini/skills/` | Human-mediated |
-| Antigravity | `.agents/`, `AGENTS.md`, or `GEMINI.md` | `.agents/skills/` | Human-mediated |
+| generic | Always available | `.agents/skills/` | Handoff only |
+| Claude Code | `.claude/` | `.claude/skills/` | Interactive CLI |
+| Codex | `.agents/` or `.codex/` | `.agents/skills/` | Interactive CLI |
+| OpenCode | `.opencode/` | `.opencode/skills/` | Handoff only |
+| Gemini CLI | `.gemini/` or `GEMINI.md` | `.gemini/skills/` | Interactive CLI |
+| Antigravity | `.agents/`, `AGENTS.md`, or `GEMINI.md` | `.agents/skills/` | Interactive CLI |
 
 ## Capability reporting
 
-The current adapters report:
+The adapters report:
 - Portable Agent Skills: supported.
 - Agent handoff documents: supported.
+- Interactive CLI invocation: supported by Claude Code, Codex, Gemini CLI, and Antigravity.
 - Native subagent invocation: unsupported.
 - Parallel agent execution: unsupported.
 - Browser automation: unsupported.
@@ -32,7 +33,7 @@ A generated handoff is an instruction contract, not a sandbox. Actual filesystem
 1. WorkflowRunService exposes ready stages.
 2. Core creates a version-pinned StageTaskContract for each ready stage.
 3. The adapter renders `HANDOFF.md` and the CLI persists `task.json`.
-4. An operator delegates the handoff through the platform's native agent workflow.
+4. An operator either delegates the handoff manually or runs `aether workflow launch <run-id> --file <workflow.yaml> --adapter <id> --stage <stage-id>` for a supported interactive CLI adapter.
 5. The agent writes a result JSON and evidence files under the task output directory.
 6. `aether workflow accept` validates task identity, write scope, evidence paths, and checksums.
 7. WorkflowRunService accepts a stage completion only when the persisted verification manifest and evidence files still match their SHA-256 digests.
@@ -51,4 +52,4 @@ An adapter must:
 - Never claim execution, delegation, or approval happened when it only generated instructions.
 - Preserve user-owned platform configuration and files.
 
-A future native adapter may add explicit execution capabilities, but it must implement and test the host platform's real invocation and permission semantics.
+An interactive adapter must implement `buildLaunch` and declare `execution_mode: interactive-cli`; the shared runner starts the command without a shell and inherits the user's terminal so the host retains its permission prompts. Native subagent and parallel-dispatch capabilities must remain unsupported until their real host APIs are integrated and tested.

@@ -17,7 +17,7 @@ import {
   verifyTaskResult,
 } from "@aether/core";
 import type { TaskResultSubmission } from "@aether/core";
-import { createAgentAdapter } from "@aether/adapters";
+import { createAgentAdapter, runAgentCommand } from "@aether/adapters";
 import { inspectAgentPlatforms } from "./commands/platform-info.js";
 import {
   validateAgentAdapterDescriptor,
@@ -61,6 +61,8 @@ Commands:
   workflow run <file> [--input name=value]     Create and start a workflow run
   workflow status <run-id>                    Show persisted run and pending recovery events
   workflow handoff <run-id> --file <file>      Generate agent handoffs for ready stages
+  workflow launch <run-id> --file <file> --adapter <id> [--stage <id>]
+                                               Launch one interactive agent CLI stage
   workflow accept <run-id> --file <file> --stage <id> --result <json>
                                                Verify task result and complete its stage
   workflow pause <run-id>                     Pause a running workflow
@@ -269,6 +271,165 @@ async function handoffWorkflow(
   return 0;
 }
 
+async function launchWorkflowStage(
+  runId: string,
+  args: string[],
+): Promise<number> {
+  const options = parseOptions(args, ["--file", "--adapter", "--stage"]);
+  const filePath = options["--file"];
+  const adapterValue = options["--adapter"];
+  const requestedStage = options["--stage"];
+  if (!filePath || !adapterValue) {
+    throw new Error(
+      "Usage: workflow launch <run-id> --file <workflow-file> --adapter <claude-code|codex|gemini-cli|antigravity> [--stage <stage-id>]",
+    );
+  }
+
+  const workflow = await loadWorkflowFile(filePath);
+  const adapterId = parseAdapterId(adapterValue);
+  const adapter = createAgentAdapter(adapterId);
+  const adapterValidation = validateAgentAdapterDescriptor(adapter.descriptor);
+  if (!adapterValidation.valid) {
+    throw new Error(
+      "Adapter descriptor is invalid:\n- " +
+        adapterValidation.errors.map((issue) => issue.path + ": " + issue.message).join("\n- "),
+    );
+  }
+  if (adapter.descriptor.execution_mode !== "interactive-cli") {
+    throw new Error(
+      'Adapter "' + adapterId + '" supports handoff only. Use "workflow handoff" or select an interactive CLI adapter.',
+    );
+  }
+
+  const service = createRunService();
+  let snapshot = await service.getRun(runId);
+  if (snapshot.workflow_id !== workflow.id || snapshot.workflow_version !== workflow.version) {
+    throw new Error("Workflow definition does not match the run's pinned identity and version.");
+  }
+
+  const launchableStages = workflow.stages.filter((definition) => {
+    const status = snapshot.stages[definition.id]?.status;
+    return status === "ready" || status === "failed";
+  });
+  let stageId = requestedStage;
+  if (!stageId) {
+    if (launchableStages.length !== 1) {
+      const available = launchableStages.map((stage) => stage.id);
+      throw new Error(
+        "Select one stage with --stage. Launchable stages: " +
+          (available.length > 0 ? available.join(", ") : "none"),
+      );
+    }
+    stageId = launchableStages[0]!.id;
+  }
+
+  const stageDefinition = workflow.stages.find((definition) => definition.id === stageId);
+  const stageState = snapshot.stages[stageId];
+  if (!stageDefinition || !stageState) {
+    throw new Error('Unknown stage "' + stageId + '" in workflow "' + workflow.id + '".');
+  }
+  if (stageState.status !== "ready" && stageState.status !== "failed") {
+    throw new Error(
+      'Stage "' + stageId + '" must be ready or failed to launch; current status is "' +
+        stageState.status + '".',
+    );
+  }
+
+  const taskSnapshot = stageState.status === "ready"
+    ? snapshot
+    : {
+        ...snapshot,
+        stages: {
+          ...snapshot.stages,
+          [stageId]: { ...stageState, status: "ready" as const },
+        },
+      };
+  const task = planReadyStageTasks(taskSnapshot, workflow, adapterId)
+    .find((candidate) => candidate.stage_id === stageId);
+  if (!task) {
+    throw new Error('Could not construct a launch contract for stage "' + stageId + '".');
+  }
+
+  const taskValidation = validateDelegationContract(task);
+  if (!taskValidation.valid) {
+    throw new Error(
+      "Delegation contract is invalid:\n- " +
+        taskValidation.errors.map((issue) => issue.path + ": " + issue.message).join("\n- "),
+    );
+  }
+
+  const base = ".aether/handoffs/" + runId + "/" + stageId;
+  const handoffPath = base + "/HANDOFF.md";
+  await writeProjectFile(base + "/task.json", JSON.stringify(task, null, 2) + "\n");
+  await writeProjectFile(handoffPath, adapter.renderHandoff(task));
+
+  const launch = adapter.buildLaunch(task, handoffPath);
+  if (!launch) {
+    throw new Error('Adapter "' + adapterId + '" did not provide an interactive launch command.');
+  }
+
+  const detected = await adapter.detect(process.cwd());
+  console.log(
+    "Adapter: " + adapter.descriptor.name +
+      (detected ? " (project marker detected)" : " (explicitly selected; no project marker detected)"),
+  );
+  console.log("Stage: " + stageId);
+  for (const note of launch.permission_notes) {
+    console.log("Permission: " + note);
+  }
+
+  if (stageState.status === "failed") {
+    snapshot = await service.transitionStage(runId, workflow, stageId, "ready");
+  }
+  if (snapshot.stages[stageId]?.status === "ready") {
+    snapshot = await service.transitionStage(runId, workflow, stageId, "in_progress");
+  }
+
+  console.log("Launching " + launch.command + " for stage " + stageId + "...");
+  let result;
+  try {
+    result = await runAgentCommand(launch, process.cwd());
+  } catch (error) {
+    const current = await service.getRun(runId);
+    if (current.stages[stageId]?.status === "in_progress") {
+      await service.transitionStage(
+        runId,
+        workflow,
+        stageId,
+        "failed",
+        { reason: "The native agent CLI could not be started." },
+      );
+    }
+    throw error;
+  }
+
+  if (result.exit_code === 0 && result.signal === null) {
+    const current = await service.getRun(runId);
+    printRun(current);
+    console.log("");
+    console.log("Agent process exited successfully (" + result.duration_ms + " ms). The stage remains in progress until its result is accepted.");
+    console.log(
+      "Next: aether workflow accept " + runId +
+        " --file " + filePath + " --stage " + stageId + " --result " + task.expected_result_path,
+    );
+    return 0;
+  }
+
+  const reason = result.signal
+    ? "The native agent CLI stopped with signal " + result.signal + "."
+    : "The native agent CLI exited with code " + String(result.exit_code) + ".";
+  const failed = await service.transitionStage(
+    runId,
+    workflow,
+    stageId,
+    "failed",
+    { reason },
+  );
+  printRun(failed);
+  console.error(reason);
+  return result.exit_code ?? 1;
+}
+
 async function acceptWorkflowTask(
   runId: string,
   args: string[],
@@ -439,6 +600,11 @@ async function runWorkflowCommand(args: string[]): Promise<number> {
       console.log("Run: aether workflow recover " + resource + " --file <workflow-file>");
     }
     return 0;
+  }
+
+  if (subcommand === "launch") {
+    if (!resource) throw new Error("Usage: aether workflow launch <run-id> --file <workflow-file> --adapter <id> [--stage <stage-id>]");
+    return launchWorkflowStage(resource, options);
   }
 
   if (subcommand === "handoff") {

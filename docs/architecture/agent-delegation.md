@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The delegation layer connects Aether's workflow stages to coding agents without replacing the agent platform's runtime. The current implementation produces human-mediated task handoffs for generic agents, Claude Code, Codex, OpenCode, Gemini CLI, and Antigravity. Native subagent execution and parallel dispatch remain future adapter capabilities.
+The delegation layer connects Aether's workflow stages to coding agents without replacing the agent platform's runtime. It can prepare portable human-mediated handoffs for all adapters and launch one selected interactive CLI session for Claude Code, Codex, Gemini CLI, or Antigravity. Generic and OpenCode remain handoff-only. Native subagent dispatch and parallel agent execution remain unsupported.
 
 ## Stage task contract
 
@@ -52,6 +52,8 @@ Aether computes SHA-256 and byte size for evidence files. Changed files must exi
 ```bash
 aether workflow handoff <run-id> --file workflows/feature.yaml --adapter generic
 
+aether workflow launch <run-id> --file workflows/feature.yaml --adapter codex --stage discovery
+
 aether workflow accept <run-id> \
   --file workflows/feature.yaml \
   --stage discovery \
@@ -75,6 +77,6 @@ Only then may the stage transition to `completed`. A stale, tampered, out-of-sco
 - Agent-produced summaries and evidence descriptions are untrusted claims.
 - Hashes prove file identity/integrity after verification; they do not prove the semantics of a test report or that an external command genuinely ran.
 - The current verifier does not independently execute tests or parse arbitrary test-runner output.
-- The current adapters do not launch agents or enforce OS-level permissions.
+- Selected adapters can start an interactive host CLI, but Aether does not dispatch native subagents or enforce OS-level permissions.
 - The CLI should be used with trusted repository state and platform permission controls.
 - Production deployments, destructive operations, and credential access require separate policy and approval controls.

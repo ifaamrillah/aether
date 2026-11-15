@@ -9,9 +9,10 @@ Adapters describe real host capabilities and translate portable task contracts i
 3. Declare platform markers and its project-level `skill_install_path`.
 4. Report each capability truthfully as `native`, `supported`, `degraded`, or `unsupported`.
 5. Implement project detection and handoff rendering.
-6. Update `packages/schemas/json-schema/adapter.schema.json` only when the public contract changes.
-7. Add tests for descriptor validity, detection, paths, output rendering, and unsupported capabilities.
-8. Update the adapter reference and CI fixtures.
+6. For interactive CLI support, add a `buildLaunch` implementation that returns an argument array and permission notes; do not construct shell command strings.
+7. Update `packages/schemas/json-schema/adapter.schema.json` only when the public contract changes.
+8. Add tests for descriptor validity, detection, paths, output rendering, launch arguments, and unsupported capabilities.
+9. Update the adapter reference and CI fixtures.
 
 ## Capability principles
 
@@ -21,7 +22,7 @@ Adapters describe real host capabilities and translate portable task contracts i
 - Native parallel execution must only be reported when it is actually integrated and tested.
 - Platform approval semantics must not be inferred from generic prompts.
 
-The current adapters use human-mediated handoff. A future native adapter may implement real invocation, result collection, cancellation, permission boundaries, and parallel execution, but each behavior must have integration tests against the host platform.
+All adapters keep the `human-mediated` handoff contract. Selected adapters additionally start an interactive host CLI through the shared process runner; this is not native subagent dispatch. Use `shell: false`, preserve host permission prompts, and test the actual command/argument contract. Native subagents, cancellation APIs, enforced file boundaries, and parallel execution remain unsupported until each behavior has integration tests against the host platform.
 
 ## Validate
 

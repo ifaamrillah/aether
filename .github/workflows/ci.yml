@@ -82,30 +82,41 @@ jobs:
           echo "$output"
           run_id="$(printf '%s\n' "$output" | sed -n 's/^Run: //p' | head -n 1)"
           test -n "$run_id"
-          node apps/cli/dist/index.js workflow handoff "$run_id" --file workflows/feature.yaml --adapter generic
-          test -f ".aether/handoffs/$run_id/discovery/HANDOFF.md"
-          mkdir -p ".aether/handoffs/$run_id/discovery/output"
-          printf 'CI evidence: discovery artifact created\n' > ".aether/handoffs/$run_id/discovery/output/test-report.txt"
-          node - ".aether/handoffs/$run_id/discovery/task.json" ".aether/handoffs/$run_id/discovery/result.json" "$run_id" <<'NODE'
+          fake_agent_dir="$(mktemp -d)"
+          cat > "$fake_agent_dir/codex" <<'NODE'
+          #!/usr/bin/env node
           const fs = require("node:fs");
-          const task = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-          const runId = process.argv[4];
+          const path = require("node:path");
+          const taskPath = process.env.AETHER_TEST_TASK_PATH;
+          if (!taskPath) process.exit(2);
+          const task = JSON.parse(fs.readFileSync(taskPath, "utf8"));
+          const taskDirectory = path.dirname(taskPath);
+          const outputDirectory = path.join(taskDirectory, "output");
+          fs.mkdirSync(outputDirectory, { recursive: true });
+          const evidencePath = path.join(outputDirectory, "test-report.txt");
+          fs.writeFileSync(evidencePath, "CI evidence: interactive launch adapter created this report.\n");
           const result = {
             schema_version: 1,
             task_id: task.task_id,
             run_id: task.run_id,
             stage_id: task.stage_id,
-            summary: "CI smoke test completed the discovery handoff.",
+            summary: "CI smoke test completed the discovery launch.",
             changed_files: [],
             evidence: [{
-              path: ".aether/handoffs/" + runId + "/discovery/output/test-report.txt",
+              path: path.relative(process.cwd(), evidencePath).split(path.sep).join("/"),
               type: "test_report",
               result: "passed",
-              summary: "CI created this non-empty evidence fixture."
+              summary: "The fake native CLI produced a non-empty evidence fixture."
             }]
           };
-          fs.writeFileSync(process.argv[3], JSON.stringify(result, null, 2));
+          fs.writeFileSync(path.join(taskDirectory, "result.json"), JSON.stringify(result, null, 2));
           NODE
+          chmod +x "$fake_agent_dir/codex"
+          export PATH="$fake_agent_dir:$PATH"
+          export AETHER_TEST_TASK_PATH="$GITHUB_WORKSPACE/.aether/handoffs/$run_id/discovery/task.json"
+          node apps/cli/dist/index.js workflow launch "$run_id" --file workflows/feature.yaml --adapter codex --stage discovery
+          test -f ".aether/handoffs/$run_id/discovery/HANDOFF.md"
+          test -f ".aether/handoffs/$run_id/discovery/result.json"
           node apps/cli/dist/index.js workflow accept "$run_id" --file workflows/feature.yaml --stage discovery --result ".aether/handoffs/$run_id/discovery/result.json"
           node apps/cli/dist/index.js workflow status "$run_id"
           node apps/cli/dist/index.js workflow pause "$run_id"

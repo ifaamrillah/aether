@@ -84,7 +84,20 @@ Prepare handoffs for a run:
 node apps/cli/dist/index.js workflow handoff <run-id> --file workflows/aether/feature.yaml --adapter claude-code
 ```
 
-Each ready stage receives a task contract and `HANDOFF.md` under `.aether/handoffs/<run-id>/<stage-id>/`. Select `generic`, `claude-code`, `codex`, `opencode`, `gemini-cli`, or `antigravity`. These adapters prepare human-mediated handoffs; they do not launch platform agents.
+Each ready stage receives a task contract and `HANDOFF.md` under `.aether/handoffs/<run-id>/<stage-id>/`. Select `generic`, `claude-code`, `codex`, `opencode`, `gemini-cli`, or `antigravity`.
+
+Launch one stage through a supported interactive agent CLI:
+
+```bash
+node apps/cli/dist/index.js workflow launch <run-id> \
+  --file workflows/aether/feature.yaml \
+  --adapter codex \
+  --stage discovery
+```
+
+Interactive launch is supported for Claude Code, Codex, Gemini CLI, and Antigravity. Aether starts the host CLI without a shell and leaves its normal permission and approval flow in control. Launch one stage per invocation; specify `--stage` when more than one stage is ready or failed. Generic and OpenCode remain handoff-only adapters.
+
+A successful CLI exit does not complete a workflow stage. The stage remains `in_progress` until you inspect the agent's result and evidence, then run `workflow accept` as shown below. Native subagent dispatch and parallel agent execution are not implemented.
 
 After the agent has worked, create the task result JSON at the path specified by the handoff and attach evidence files inside the project. Accept and verify the result:
 
@@ -101,7 +114,7 @@ Hashes prove file integrity, not the truth of an agent's report or that a test c
 
 Use the run ID with `workflow status`, `workflow pause`, `workflow resume --file <workflow-file>`, `workflow recover --file <workflow-file>`, or `workflow cancel`. The workflow file remains in `workflows/aether/` and is updated conservatively by `aether update`.
 
-The current adapters produce portable instructions and collect results. They do not yet execute native subagents, enforce OS-level file permissions, or independently rerun every test command.
+Interactive adapters can launch the host CLI, but they do not execute native subagents or dispatch parallel workers. Task file scopes remain contracts rather than OS-level permissions, and Aether does not independently rerun every test command.
 
 Inspect platform adapters and detected project markers with:
 
