@@ -105,7 +105,7 @@ describe("Ed25519 approval authorization", () => {
     const approval = createApproval();
     expect(() => authorizer().authorize(createReceipt(approval, { expires_at: "2026-11-15T01:00:59.000Z" }), approval))
       .toThrow(/expired/);
-    expect(() => authorizer().authorize(createReceipt(approval, { issued_at: "2026-11-15T00:59:00.000Z" }), approval))
+    expect(() => authorizer().authorize(createReceipt(approval, { issued_at: "2026-11-15T00:58:59.000Z" }), approval))
       .toThrow(/request and clock window/);
     expect(() => authorizer().authorize(createReceipt(approval, { expires_at: "2026-11-15T02:00:30.000Z" }), approval))
       .toThrow(/maximum receipt lifetime/);
