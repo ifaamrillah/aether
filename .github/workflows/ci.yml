@@ -139,3 +139,43 @@ jobs:
           node apps/cli/dist/index.js workflow resume "$run_id" --file workflows/feature.yaml
           node apps/cli/dist/index.js workflow cancel "$run_id"
 
+      - name: Smoke test workflow approval gates
+        shell: bash
+        run: |
+          node apps/cli/dist/index.js trust keygen --id ci-maintainer
+          node apps/cli/dist/index.js trust register --id ci-maintainer --public-key .aether/keys/ci-maintainer.public.pem --roles maintainer
+          node apps/cli/dist/index.js trust list
+          node apps/cli/dist/index.js trust validate
+          approval_workflow="$RUNNER_TEMP/aether-approval-workflow.yaml"
+          cat > "$approval_workflow" <<'YAML'
+          schema_version: 1
+          id: ci-approval-gate
+          version: 1
+          name: CI Approval Gate
+          description: Exercise a required signed approval gate.
+          inputs: []
+          stages:
+            - id: protected-change
+              skill: implementation
+              required: true
+              approval:
+                mode: required
+                risk: high
+                require_signature: true
+                allowed_approvers: [ci-maintainer]
+                required_roles: [maintainer]
+                prevent_self_approval: true
+          completion:
+            required_stages:
+              - protected-change
+          YAML
+          output="$(node apps/cli/dist/index.js workflow run "$approval_workflow")"
+          echo "$output"
+          approval_run_id="$(printf "%s\n" "$output" | sed -n "s/^Run: //p" | head -n 1)"
+          test -n "$approval_run_id"
+          printf "%s\n" "$output" | grep -q "awaiting_approval"
+          node apps/cli/dist/index.js workflow approve "$approval_run_id" --file "$approval_workflow" --stage protected-change --by ci-maintainer --key .aether/keys/ci-maintainer.private.pem --reason "CI approval-gate smoke test"
+          status="$(node apps/cli/dist/index.js workflow status "$approval_run_id")"
+          echo "$status"
+          printf "%s\n" "$status" | grep -q "protected-change.*ready"
+          node -e 'const fs=require("node:fs"); const id=process.argv[1]; const run=JSON.parse(fs.readFileSync(".aether/runs/"+id+"/run.json","utf8")); const events=fs.readFileSync(".aether/runs/"+id+"/events.jsonl","utf8").trim().split("\n").map(JSON.parse); const decision=events.map(e=>e.payload?.approval).find(a=>a?.status==="approved"); if(!decision?.decision_signature || decision.decision_signature.algorithm!=="ed25519" || decision.decision_signature.key_id!=="ci-maintainer") process.exit(1); if(run.stages["protected-change"].status!=="ready") process.exit(1);' "$approval_run_id"

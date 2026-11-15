@@ -41,6 +41,21 @@ describe("validateWorkflowSemantics", () => {
     expect(validateWorkflowSemantics(definition)).toEqual([]);
   });
 
+  it("requires cryptographic signatures when approver or role restrictions are configured", () => {
+    const restricted = workflow([{
+      id: "protected", skill: "implementation", required: true,
+      approval: { mode: "required", allowed_approvers: ["maintainer"] },
+    }]);
+    expect(validateWorkflowSemantics(restricted).map((issue) => issue.code))
+      .toContain("approval_policy_requires_signature");
+    const signedWithoutGate = workflow([{
+      id: "ungated", skill: "implementation", required: true,
+      approval: { mode: "none", require_signature: true },
+    }]);
+    expect(validateWorkflowSemantics(signedWithoutGate).map((issue) => issue.code))
+      .toContain("approval_signature_requires_gate");
+  });
+
   it("reports duplicate stage identifiers", () => {
     const definition = workflow([
       { id: "review", skill: "review", required: true },

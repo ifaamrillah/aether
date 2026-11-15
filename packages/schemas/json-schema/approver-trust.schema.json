@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aether.dev/schemas/approver-trust.schema.json",
+  "title": "Aether Trusted Approver Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "identities"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "identities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "public_key_pem",
+          "roles",
+          "active"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "common.schema.json#/$defs/identifier"
+          },
+          "public_key_pem": {
+            "type": "string",
+            "minLength": 80,
+            "pattern": "-----BEGIN PUBLIC KEY-----"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "common.schema.json#/$defs/identifier"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
+      },
+      "uniqueItems": true
+    }
+  }
+}

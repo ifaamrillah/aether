@@ -20,6 +20,41 @@ export type StageStatus =
   | "skipped"
   | "stale";
 
+export type ApprovalRisk = "low" | "medium" | "high" | "critical";
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired" | "revoked";
+
+export interface ApprovalAction {
+  id: string;
+  type: string;
+  target?: string;
+  risk: ApprovalRisk;
+  requested_by: string;
+  context: Record<string, unknown>;
+}
+
+export interface ApprovalDecisionSignature {
+  algorithm: "ed25519";
+  key_id: string;
+  roles: string[];
+  signature: string;
+}
+
+export interface ApprovalRecord {
+  schema_version: 1;
+  id: string;
+  action: ApprovalAction;
+  status: ApprovalStatus;
+  requested_at: string;
+  requested_by: string;
+  decided_at?: string;
+  decided_by?: string;
+  decision_reason?: string;
+  expires_at?: string;
+  policy_version: string;
+  action_digest: string;
+  decision_signature?: ApprovalDecisionSignature;
+}
+
 export interface ArtifactReference {
   artifact_id: string;
   path: string;

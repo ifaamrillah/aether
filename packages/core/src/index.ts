@@ -13,3 +13,5 @@ export * from "./workflow/index.js";
 export * from "./context/index.js";
 
 export * from "./state/index.js";
+
+export * from "./approval-trust.js";

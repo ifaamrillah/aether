@@ -52,6 +52,7 @@ export type ContractSchemaName =
   | "event"
   | "task"
   | "approval"
+  | "approver-trust"
   | "project-config"
   | "adapter"
   | "delegation"
@@ -72,6 +73,7 @@ const schemaNames: ContractSchemaName[] = [
   "event",
   "task",
   "approval",
+  "approver-trust",
   "project-config",
   "adapter",
   "delegation",

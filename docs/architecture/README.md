@@ -21,3 +21,8 @@ Aether owns workflow definitions, state, contracts, policy decisions, and eviden
 - Treat workflow artifacts as durable sources of truth, not chat history.
 - Fall back to sequential execution when a platform lacks parallel delegation.
 - Do not treat policy checks as an operating-system sandbox.
+- Require explicit, auditable human decisions before protected workflow stages proceed.
+
+## Approval gates
+
+See [Approval gates](approval-gates.md) for required/optional stage approval, event-log persistence, action binding, and the current identity and authorization limitations.

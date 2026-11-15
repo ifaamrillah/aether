@@ -267,8 +267,39 @@
                 "optional",
                 "required"
               ]
+            },
+            "risk": {
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            },
+            "require_signature": {
+              "type": "boolean"
+            },
+            "allowed_approvers": {
+              "type": "array",
+              "items": {
+                "$ref": "common.schema.json#/$defs/identifier"
+              },
+              "uniqueItems": true
+            },
+            "required_roles": {
+              "type": "array",
+              "items": {
+                "$ref": "common.schema.json#/$defs/identifier"
+              },
+              "uniqueItems": true
+            },
+            "prevent_self_approval": {
+              "type": "boolean"
             }
-          }
+          },
+          "required": [
+            "mode"
+          ]
         },
         "scope": {
           "type": "object",

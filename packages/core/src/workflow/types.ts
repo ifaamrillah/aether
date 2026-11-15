@@ -29,6 +29,14 @@ export interface WorkflowStageDefinition {
   description?: string;
   depends_on?: string[];
   condition?: WorkflowConditionDefinition;
+  approval?: {
+    mode: "none" | "optional" | "required";
+    risk?: "low" | "medium" | "high" | "critical";
+    require_signature?: boolean;
+    allowed_approvers?: string[];
+    required_roles?: string[];
+    prevent_self_approval?: boolean;
+  };
   scope?: {
     read_paths?: string[];
     write_paths?: string[];
@@ -61,7 +69,9 @@ export type WorkflowValidationCode =
   | "conditional_dependency_outside_required_path"
   | "condition_unknown_input"
   | "condition_unknown_stage"
-  | "condition_stage_reference_not_dependency";
+  | "condition_stage_reference_not_dependency"
+  | "approval_policy_requires_signature"
+  | "approval_signature_requires_gate";
 
 export interface WorkflowValidationIssue {
   code: WorkflowValidationCode;

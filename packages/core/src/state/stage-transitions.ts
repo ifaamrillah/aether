@@ -6,14 +6,14 @@ import {
 } from "./errors.js";
 
 const ALLOWED_TRANSITIONS = {
-  pending: ["ready", "skipped"],
+  pending: ["ready", "awaiting_approval", "skipped"],
   ready: ["in_progress", "blocked", "awaiting_approval", "skipped"],
   in_progress: ["verifying", "blocked", "failed"],
-  blocked: ["ready", "failed"],
+  blocked: ["ready", "awaiting_approval", "failed"],
   awaiting_approval: ["ready", "blocked", "failed"],
   verifying: ["completed", "failed", "blocked"],
   completed: ["stale"],
-  failed: ["ready", "blocked"],
+  failed: ["ready", "awaiting_approval", "blocked"],
   skipped: ["stale"],
   stale: ["ready", "skipped"],
 } as const satisfies Record<StageStatus, readonly StageStatus[]>;
@@ -23,6 +23,7 @@ export interface StageTransitionInput {
   event_sequence: number;
   timestamp: string;
   reason?: string;
+  approval_id?: string;
 }
 
 export function getAllowedStageTransitions(
@@ -66,6 +67,12 @@ export function transitionStageState(
     );
   }
 
+  if (input.to === "awaiting_approval" && !input.approval_id?.trim()) {
+    throw new StateIntegrityError(
+      'An approval id is required when stage "' + current.stage_id + '" awaits approval.',
+    );
+  }
+
   if (input.to === "blocked" && !input.reason?.trim()) {
     throw new StateIntegrityError(
       'A reason is required when stage "' + current.stage_id + '" becomes blocked.',
@@ -77,6 +84,10 @@ export function transitionStageState(
     status: input.to,
     last_event_sequence: input.event_sequence,
   };
+
+  if (input.to === "awaiting_approval") {
+    next.approval_id = input.approval_id!;
+  }
 
   if (input.to === "in_progress") {
     next.attempt += 1;
