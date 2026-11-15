@@ -89,7 +89,7 @@ Each ready stage receives a task contract and `HANDOFF.md` under `.aether/handof
 Launch one stage through a supported interactive agent CLI:
 
 ```bash
-node apps/cli/dist/index.js workflow launch <run-id> \\
+node apps/cli/dist/index.js workflow launch <run-id> \
   --file workflows/aether/feature.yaml \\
   --adapter codex \\
   --stage discovery
