@@ -260,6 +260,10 @@ async function collectDocuments(
           filesSkipped += 1;
           continue;
         }
+        if (totalBytes + buffer.byteLength > options.maxTotalBytes) {
+          truncated = true;
+          return;
+        }
         const content = buffer.toString("utf8");
         const replacementCount = (content.match(/\uFFFD/g) ?? []).length;
         if (replacementCount > Math.max(3, Math.floor(content.length * 0.005))) {
